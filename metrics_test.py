@@ -196,4 +196,4 @@ def test_finds_maximum_true_arg(
 
 
 if __name__ == '__main__':
-  pytest.main()
+  pytest.main([__file__])
