@@ -19,7 +19,7 @@ _PLUS_KERNEL = onp.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], bool)
 
 def minimum_length_scale(
     x: onp.ndarray,
-    ignore_interfaces: bool=True,
+    ignore_interfaces: bool = True,
     non_monotonic_allowance: int = DEFAULT_NON_MONOTONIC_ALLOWANCE,
 ) -> int:
   """Identifies the minimum length scale of features in boolean array `x`.

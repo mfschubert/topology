@@ -3,7 +3,7 @@
 import itertools
 import numpy as onp
 import pytest
-from scipy.ndimage import morphology
+from scipy import ndimage
 import unittest
 
 import metrics
@@ -114,7 +114,7 @@ def test_no_brush_violations_with_feasible_arrays(x, kernel):
 def test_erosion_matches_scipy(x):
   x_padded = onp.pad(x, ((1, 1), (1, 1)), mode='edge')
   kernel = onp.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], bool)
-  expected = morphology.binary_erosion(x_padded, kernel)
+  expected = ndimage.binary_erosion(x_padded, kernel)
   expected = expected[1:-1, 1:-1]
   actual = metrics.binary_erosion(x)
   onp.testing.assert_array_equal(expected, actual)
@@ -125,7 +125,7 @@ def test_erosion_matches_scipy(x):
 def test_opening_matches_scipy(x, kernel):
   pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
   x_padded = onp.pad(x, pad_width, mode='edge')
-  expected = morphology.binary_opening(x_padded, kernel)
+  expected = ndimage.binary_opening(x_padded, kernel)
   expected = expected[pad_width[0][0]:expected.shape[0] - pad_width[0][1],
                       pad_width[1][0]:expected.shape[1] - pad_width[1][1]]
   actual = metrics.binary_opening(x, kernel)
