@@ -163,25 +163,12 @@ class KernelTest(unittest.TestCase):
 
 
 class IgnorePixelsTest(unittest.TestCase):
-    IGNORE_TEST_ARRAY = onp.array(
-        [
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-            [0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1],
-            [0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1],
-            [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1],
-        ],
-        dtype=bool,
-    )
-
     def test_ignore_none(self):
-        ignored = metrics.ignored_pixels(self.IGNORE_TEST_ARRAY, ())
+        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, ())
         onp.testing.assert_array_equal(ignored, onp.zeros_like(ignored))
 
     def test_ignore_peninsula(self):
-        ignored = metrics.ignored_pixels(self.IGNORE_TEST_ARRAY, IGNORE_PENINSULAS)
+        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, IGNORE_PENINSULAS)
         expected = onp.array(
             [
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -197,7 +184,7 @@ class IgnorePixelsTest(unittest.TestCase):
         onp.testing.assert_array_equal(ignored, expected)
 
     def test_ignore_corner(self):
-        ignored = metrics.ignored_pixels(self.IGNORE_TEST_ARRAY, IGNORE_CORNERS)
+        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, IGNORE_CORNERS)
         expected = onp.array(
             [
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -213,7 +200,7 @@ class IgnorePixelsTest(unittest.TestCase):
         onp.testing.assert_array_equal(ignored, expected)
 
     def test_ignore_interfaces(self):
-        ignored = metrics.ignored_pixels(self.IGNORE_TEST_ARRAY, IGNORE_INTERFACES)
+        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, IGNORE_INTERFACES)
         expected = onp.array(
             [
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -263,6 +250,21 @@ class MorphologyOperationsTest(unittest.TestCase):
             dtype=bool,
         )
         onp.testing.assert_array_equal(expected, actual)
+
+    def test_count_neighbors(self):
+        neighbors = metrics.count_neighbors(TEST_ARRAY_5_WITH_DEFECT)
+        expected = onp.array(
+            [  
+                [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+                [0, 2, 2, 3, 2, 2, 0, 0, 0, 0, 0, 0, 0],
+                [1, 2, 4, 4, 4, 1, 1, 0, 0, 0, 0, 1, 1],
+                [1, 3, 4, 4, 3, 3, 0, 0, 0, 0, 2, 2, 3],
+                [1, 2, 4, 4, 4, 1, 1, 0, 0, 1, 2, 4, 4],
+                [0, 2, 2, 3, 2, 2, 0, 0, 0, 1, 3, 4, 4],
+                [0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 3, 4, 4],
+            ],
+        )
+        onp.testing.assert_array_equal(neighbors, expected)
 
     @parameterized.parameterized.expand(
         [

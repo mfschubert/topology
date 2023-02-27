@@ -241,6 +241,7 @@ def count_neighbors(x: onp.ndarray) -> onp.ndarray:
         src=x.view(onp.uint8),
         kernel=_NEIGHBOR_KERNEL.view(onp.uint8),
         ddepth=-1,
+        borderType=cv2.BORDER_REPLICATE,
     )
 
 
