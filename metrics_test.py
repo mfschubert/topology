@@ -79,7 +79,7 @@ TEST_KERNELS = [TEST_KERNEL_4, TEST_KERNEL_5, TEST_KERNEL_4_3_ASYMMETRIC]
 
 IGNORE_NONE = [(None, ())]
 IGNORE_PENINSULAS = [(None, (1,))]
-IGNORE_INTERFACES = [(None, (0, 1, 2, 3))]
+ignore_edges = [(None, (0, 1, 2, 3))]
 IGNORE_CORNERS = [(None, (2,))]
 
 
@@ -93,7 +93,7 @@ class LengthScaleTest(unittest.TestCase):
     )
     def test_length_scale_matches_expected(self, x, expected_solid, expected_void):
         length_scale_solid, length_scale_void = metrics.minimum_length_scale(
-            x, IGNORE_NONE
+            x, ignore_edges=False
         )
         self.assertEqual(length_scale_solid, expected_solid)
         self.assertEqual(length_scale_void, expected_void)
@@ -104,9 +104,7 @@ class LengthScaleTest(unittest.TestCase):
         # to the length scale. Pad to make sure the feature is isolated.
         x = metrics.kernel_for_length_scale(length_scale)
         x = onp.pad(x, ((1, 1), (1, 1)), mode="constant")
-        length_scale_solid, length_scale_void = metrics.minimum_length_scale(
-            x, IGNORE_NONE
-        )
+        length_scale_solid, length_scale_void = metrics.minimum_length_scale(x)
         self.assertEqual(length_scale_solid, length_scale)
         self.assertEqual(length_scale_void, min(x.shape))
 
@@ -116,29 +114,31 @@ class LengthScaleTest(unittest.TestCase):
         # to the length scale. Pad to make sure the feature is isolated.
         x = metrics.kernel_for_length_scale(length_scale)
         x = onp.pad(x, ((1, 1), (1, 1)), mode="constant")
-        length_scale_solid, length_scale_void = metrics.minimum_length_scale(
-            ~x, IGNORE_NONE
-        )
+        length_scale_solid, length_scale_void = metrics.minimum_length_scale(~x)
         self.assertEqual(length_scale_void, length_scale)
         self.assertEqual(length_scale_solid, min(x.shape))
+
+    @parameterized.parameterized.expand([[i] for i in range(1, 20)])
+    def test_line_has_expected_length_scale(self, length_scale):
+        # Make an array that has a single void circular feature with diameter equal
+        # to the length scale. Pad to make sure the feature is isolated.
+        x = onp.zeros((40, 40), dtype=bool)
+        x[:, 10 : (10 + length_scale)] = True
+        length_scale_solid, length_scale_void = metrics.minimum_length_scale(x)
+        self.assertEqual(length_scale_solid, length_scale)
+        self.assertEqual(length_scale_void, min(x.shape))
 
     def test_brush_violations_with_interface_defects(self):
         # Assert that there are violations in the defective array.
         assert onp.any(
             metrics.length_scale_violations_solid(
-                TEST_ARRAY_5_WITH_DEFECT, 4, IGNORE_NONE
+                TEST_ARRAY_5_WITH_DEFECT, 4, ignore_edges=False
             )
         )
         # Assert that there are no violations if we ignore interfaces.
         assert not onp.any(
             metrics.length_scale_violations_solid(
-                TEST_ARRAY_5_WITH_DEFECT, 4, IGNORE_INTERFACES
-            )
-        )
-        # Assert that there are violations if we only ignore corners.
-        assert onp.any(
-            metrics.length_scale_violations_solid(
-                TEST_ARRAY_5_WITH_DEFECT, 4, IGNORE_CORNERS
+                TEST_ARRAY_5_WITH_DEFECT, 4, ignore_edges=True
             )
         )
 
@@ -154,44 +154,54 @@ class LengthScaleTest(unittest.TestCase):
         self.assertEqual(length_scale_void, 70)
 
     def test_feasibility_gap(self):
+        # Create arrays with diameter-6 and diameter-7 circles, and pad them up
+        # to have the same shape.
         circle6 = onp.pad(metrics.kernel_for_length_scale(6), ((2, 1), (2, 1)))
         circle7 = onp.pad(metrics.kernel_for_length_scale(7), ((1, 1), (1, 1)))
         # Check that the `circle6` is feasible with `6` but infeasible with `7`.
         self.assertFalse(
-            onp.any(metrics.length_scale_violations_solid(circle6, 6, IGNORE_NONE))
+            onp.any(
+                metrics.length_scale_violations_solid(circle6, 6, ignore_edges=True)
+            )
         )
         self.assertTrue(
-            onp.any(metrics.length_scale_violations_solid(circle6, 7, IGNORE_NONE))
+            onp.any(
+                metrics.length_scale_violations_solid(circle6, 7, ignore_edges=True)
+            )
         )
         # Check that the `circle7` is infeasible with `6` but feasible with `7`.
         self.assertTrue(
-            onp.any(metrics.length_scale_violations_solid(circle7, 6, IGNORE_NONE))
+            onp.any(
+                metrics.length_scale_violations_solid(circle7, 6, ignore_edges=True)
+            )
         )
         self.assertFalse(
-            onp.any(metrics.length_scale_violations_solid(circle7, 7, IGNORE_NONE))
+            onp.any(
+                metrics.length_scale_violations_solid(circle7, 7, ignore_edges=True)
+            )
         )
         # Check that putting both features in the same design makes it infeasible
         # for `6` and `7`.
         merged = onp.concatenate([circle6, circle7])
         self.assertTrue(
-            onp.any(metrics.length_scale_violations_solid(merged, 6, IGNORE_NONE))
+            onp.any(metrics.length_scale_violations_solid(merged, 6, ignore_edges=True))
         )
         self.assertTrue(
-            onp.any(metrics.length_scale_violations_solid(merged, 7, IGNORE_NONE))
+            onp.any(metrics.length_scale_violations_solid(merged, 7, ignore_edges=True))
         )
         # Check that when allowing for the feasibility gap, the merged design is
         # considered feasible with `6` but infeasible with `7`.
         self.assertFalse(
             onp.any(
                 metrics.length_scale_violations_solid_with_allowance(
-                    merged, 6, IGNORE_NONE, feasibility_gap_allowance=2
+                    merged, 6, ignore_edges=True, feasibility_gap_allowance=2
                 )
             )
         )
         self.assertTrue(
             onp.any(
                 metrics.length_scale_violations_solid_with_allowance(
-                    merged, 7, IGNORE_NONE, feasibility_gap_allowance=2
+                    merged, 7, ignore_edges=True, feasibility_gap_allowance=2
                 )
             )
         )
@@ -218,60 +228,6 @@ class KernelTest(unittest.TestCase):
         onp.testing.assert_array_equal(
             metrics.kernel_for_length_scale(3), metrics.PLUS_KERNEL
         )
-
-
-class IgnorePixelsTest(unittest.TestCase):
-    def test_ignore_none(self):
-        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, ())
-        onp.testing.assert_array_equal(ignored, onp.zeros_like(ignored))
-
-    def test_ignore_peninsula(self):
-        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, (1,))
-        expected = onp.array(
-            [
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            ],
-            dtype=bool,
-        )
-        onp.testing.assert_array_equal(ignored, expected)
-
-    def test_ignore_corner(self):
-        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, (2,))
-        expected = onp.array(
-            [
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
-                [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
-                [0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            ],
-            dtype=bool,
-        )
-        onp.testing.assert_array_equal(ignored, expected)
-
-    def test_ignore_interfaces(self):
-        ignored = metrics.ignored_pixels(TEST_ARRAY_5_WITH_DEFECT, (0, 1, 2, 3))
-        expected = onp.array(
-            [
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-                [0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1],
-                [0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0],
-                [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0],
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
-            ],
-            dtype=bool,
-        )
-        onp.testing.assert_array_equal(ignored, expected)
 
 
 # ------------------------------------------------------------------------------
@@ -363,6 +319,18 @@ class MorphologyOperationsTest(unittest.TestCase):
         actual = metrics.unpad(x, pad_width)
         onp.testing.assert_equal(expected.shape, actual.shape)
         onp.testing.assert_array_equal(expected, actual)
+
+    @parameterized.parameterized.expand(
+        [
+            [[(0, 0, 1, 0, 0)], [(0, 0, 1, 0, 0)]],
+            [[(0, 0, 1, 1, 0)], [(0, 0, 1, 1, 0)]],
+            [[(0, 0, 1, 1, 1, 0, 0, 0)], [(0, 0, 0, 1, 0, 0, 0, 0)]],
+            [[(0, 0, 0, 0, 0, 0, 0, 1)], [(0, 0, 0, 0, 0, 0, 0, 1)]],
+        ]
+    )
+    def test_topology_preserving_erosion(self, x, expected):
+        result = metrics.toplogy_preserving_binary_erosion(onp.asarray(x, dtype=bool))
+        onp.testing.assert_array_equal(result, onp.asarray(expected, dtype=bool))
 
 
 # ------------------------------------------------------------------------------

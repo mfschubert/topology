@@ -1,24 +1,16 @@
 """Defines functions that compute metrics for two-dimensional density arrays."""
 
-from typing import Callable, Optional, Sequence, Tuple
+from typing import Callable, Tuple
 
 import dataclasses
 import functools
 import cv2
 import numpy as onp
 
-# Specifies the default behavior for ignoring violations. We ignore violations
-# for any solid (void) pixel having exactly two solid (void) neighbors, which
-# corresponds to ignoring corners.
-IgnoreScheme = Sequence[Tuple[Optional[int], Tuple[int, ...]]]
 
-
-IGNORE_NONE = ((None, ()),)
-IGNORE_DEFAULT = (
-    (3, ()),  # For feature sizes up to 3, no violations are ignored.
-    (5, (2,)),  # For feature sizes up to 5, ignore corners of features.
-    (None, (2, 3)),  # For all other features, ignore interfaces.
-)
+# The `IgnoreFn` accepts a length scale and an array, and returns a mask
+# indicating the locations at which violations are to be ignored.
+IgnoreFn = Callable[[int, onp.ndarray], onp.ndarray]
 
 # Specifies behavior in searching for the minimum length scale of an array.
 FEASIBILITY_GAP_ALLOWANCE = 5
@@ -42,7 +34,7 @@ _MODE_VOID = "void"
 
 def minimum_length_scale(
     x: onp.ndarray,
-    ignore_scheme: IgnoreScheme = IGNORE_DEFAULT,
+    ignore_edges: bool = True,
     feasibility_gap_allowance: int = FEASIBILITY_GAP_ALLOWANCE,
 ) -> Tuple[int, int]:
     """Identifies the minimum length scale of solid and void features in `x`.
@@ -60,10 +52,8 @@ def minimum_length_scale(
 
     Args:
         x: Bool-typed rank-2 array containing the features.
-        ignore_scheme: Sequence of `(max_lenght_scale, Tuple[int])` where the tuple
-            of integers specifies which pixels are ignored. The sequence must be
-            ordered by `max_length_scale`, and the final value must be `None`.
-            See `ignored_pixels` for details.
+        ignore_edges: Determines whether violations for pixels at the edges of
+            features are to be ignored.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
             e.g. some features realizable with a brush `n + k` may not be realizable
@@ -73,44 +63,23 @@ def minimum_length_scale(
     Returns:
       The detected minimum length scales `(length_scale_solid, length_scale_void)`.
     """
-    _validate_ignore_scheme(ignore_scheme)
     return (
-        minimum_length_scale_solid(x, ignore_scheme, feasibility_gap_allowance),
-        minimum_length_scale_solid(~x, ignore_scheme, feasibility_gap_allowance),
+        minimum_length_scale_solid(x, ignore_edges, feasibility_gap_allowance),
+        minimum_length_scale_solid(~x, ignore_edges, feasibility_gap_allowance),
     )
-
-
-def _validate_ignore_scheme(ignore_scheme: IgnoreScheme) -> None:
-    """Validates the ordering of length scales in `ignore_scheme`."""
-    length_scales = [scale for scale, _ in ignore_scheme]
-    if not length_scales[-1] is None:
-        raise ValueError(
-            f"Final length scale in `ignore_scheme` must be `None`, but got "
-            f"{length_scales[-1]}."
-        )
-    if not all(isinstance(scale, int) for scale in length_scales[:-1]):
-        raise ValueError(
-            f"Leading length scales in `ignore_scheme` must be integers, "
-            f"but got {length_scales[:-1]}."
-        )
-    if not onp.all(onp.diff(length_scales[:-1]) > 0):
-        raise ValueError(
-            f"Leading `length_scales` must be strictly increasing, but got "
-            f"{length_scales[:-1]}."
-        )
 
 
 def minimum_length_scale_solid(
     x: onp.ndarray,
-    ignore_scheme: IgnoreScheme,
+    ignore_edges: bool,
     feasibility_gap_allowance: int,
 ) -> int:
     """Identifies the minimum length scale of solid features in `x`.
 
     Args:
         x: Bool-typed rank-2 array containing the features.
-        ignore_scheme: Specifies the length-scale-dependent ignore scheme. See
-            the `minimum_length_scale` function for details.
+        ignore_edges: Determines whether violations for pixels at the edges of
+            features are to be ignored.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
             e.g. some features realizable with a brush `n + k` may not be realizable
@@ -127,7 +96,7 @@ def minimum_length_scale_solid(
             length_scale_violations_solid_with_allowance(
                 x=x,
                 length_scale=length_scale,
-                ignore_scheme=ignore_scheme,
+                ignore_edges=ignore_edges,
                 feasibility_gap_allowance=feasibility_gap_allowance,
             )
         )
@@ -143,7 +112,7 @@ def minimum_length_scale_solid(
 def length_scale_violations_solid_with_allowance(
     x: onp.ndarray,
     length_scale: int,
-    ignore_scheme: IgnoreScheme,
+    ignore_edges: bool,
     feasibility_gap_allowance: int,
 ) -> onp.ndarray:
     """Computes the length scale violations, allowing for the feasibility gap.
@@ -151,8 +120,8 @@ def length_scale_violations_solid_with_allowance(
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
-        ignore_scheme: Specifies the length-scale-dependent ignore scheme. See
-            the `minimum_length_scale` function for details.
+        ignore_edges: Determines whether violations for pixels at the edges of
+            features are to be ignored.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
             e.g. some features realizable with a brush `n + k` may not be realizable
@@ -164,7 +133,7 @@ def length_scale_violations_solid_with_allowance(
     """
     violations = []
     for scale in range(length_scale, length_scale + feasibility_gap_allowance):
-        violations.append(length_scale_violations_solid(x, scale, ignore_scheme))
+        violations.append(length_scale_violations_solid(x, scale, ignore_edges))
     violations = onp.stack(violations, axis=0)
     return onp.all(violations, axis=0)
 
@@ -172,112 +141,71 @@ def length_scale_violations_solid_with_allowance(
 def length_scale_violations_solid(
     x: onp.ndarray,
     length_scale: int,
-    ignore_scheme: IgnoreScheme,
+    ignore_edges: bool,
 ) -> onp.ndarray:
     """Identifies length scale violations of solid features in `x`.
 
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
-        ignore_scheme: Specifies the length-scale-dependent ignore scheme. See
-            the `minimum_length_scale` function for details.
+        ignore_edges: Determines whether violations for pixels at the edges of
+            features are to be ignored.
 
     Returns:
         The array containing violations.
     """
-    result = _length_scale_violations_solid(
+    violations = _length_scale_violations_solid(
         wrapped_x=_HashableArray(x),
         length_scale=length_scale,
-        ignore_scheme=tuple(ignore_scheme))
-    assert result.shape == x.shape
-    return result
+        ignore_edges=ignore_edges,
+    )
+    assert violations.shape == x.shape
+    return violations
 
 
 @dataclasses.dataclass
 class _HashableArray:
     """Hashable wrapper for numpy arrays."""
+
     array: onp.ndarray
 
     def __hash__(self) -> int:
         return hash((self.array.dtype, self.array.shape, self.array.tobytes()))
 
     def __eq__(self, other: "_HashableArray") -> bool:
-        return onp.all(self.array == other.array) and (self.array.dtype == other.array.dtype)
+        return onp.all(self.array == other.array) and (
+            self.array.dtype == other.array.dtype
+        )
 
 
 @functools.lru_cache(maxsize=128)
 def _length_scale_violations_solid(
     wrapped_x: _HashableArray,
     length_scale: int,
-    ignore_scheme: IgnoreScheme,
+    ignore_edges: bool,
 ) -> onp.ndarray:
     """Identifies length scale violations of solid features in `x`.
+
+    This function is strict, in the sense that no violations are ignored.
 
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
-        ignore_scheme: Specifies the length-scale-dependent ignore scheme. See
-            the `minimum_length_scale` function for details.
+        ignore_edges: Determines whether violations for pixels at the edges of
+            features are to be ignored.
 
     Returns:
         The array containing violations.
     """
     x = wrapped_x.array
-
-    ignored_pixel_neighbor_counts = _select_neighbor_counts(ignore_scheme, length_scale)
-    ignored = ignored_pixels(x, ignored_pixel_neighbor_counts)
-
     kernel = kernel_for_length_scale(length_scale)
-    violations_solid_padding = x & ~binary_opening(x, kernel, mode=_MODE_SOLID)
-    violations_void_padding = x & ~binary_opening(x, kernel, mode=_MODE_VOID)
-    return (violations_solid_padding & violations_void_padding) & ~ignored
+    violations_solid = x & ~binary_opening(x, kernel, mode=_MODE_SOLID)
 
+    if ignore_edges:
+        ignored = x & ~toplogy_preserving_binary_erosion(x)
+        violations_solid = violations_solid & ~ignored
 
-def _select_neighbor_counts(
-    ignore_scheme: IgnoreScheme, length_scale: int
-) -> Tuple[int]:
-    """Returns the neighbor counts appropriate for the specified `length_scale`."""
-    for max_scale, ignore_pixel_neighbor_counts in ignore_scheme:
-        if max_scale is None or length_scale <= max_scale:
-            return ignore_pixel_neighbor_counts
-    raise ValueError("Bad `ignore_scheme` for `length_scale`, got {ignore_scheme}.")
-
-
-def ignored_pixels(
-    x: onp.ndarray,
-    ignored_pixels_neighbor_counts: Sequence[int],
-) -> onp.ndarray:
-    """Returns pixels for which length scale violations are to be ignored.
-
-    The function can be configured to select pixels that are solid, with varying
-    numbers of solid neighbors. Neighbors are considered in a 4-connected sense,
-    i.e. a solid pixel having four solid neighbors has solid pixels above, below,
-    to the left, and to the right.
-
-    Several example configurations for ignored pixels are as follows:
-        `()`: No violations are ignored.
-        `(0,)`: Ignores pixels with no neighbors, i.e. isolated single pixels.
-        `(1,)`: Ignores pixels with one neighbor, i.e. "single pixel penninsulas".
-        `(2,)`: Ignores pixels with two neighbors, i.e. corners.
-        `(0, 1, 2, 3)`: Ignores all pixels with a void neighbor, i.e. interfaces.
-
-    Args:
-        x: The array from which ignored pixels are selected.
-        ignored_pixels_neighbor_counts: Specifies which pixels to ignore. Solid
-            pixels with neighbor counts among the given `neighbor_counts_to_ignore`
-            are marked to be ignored.
-
-    Return:
-        The ignored pixels array.
-    """
-    if not all(n in (0, 1, 2, 3) for n in ignored_pixels_neighbor_counts):
-        raise ValueError(
-            f"Valid neighbor counts are `(0, 1, 2, 3)`, got "
-            f"{ignored_pixels_neighbor_counts}."
-        )
-
-    neighbor_count = count_neighbors(x)
-    return x & onp.isin(neighbor_count, ignored_pixels_neighbor_counts)
+    return violations_solid
 
 
 def kernel_for_length_scale(length_scale: int) -> onp.ndarray:
@@ -348,6 +276,28 @@ def binary_opening(x: onp.ndarray, kernel: onp.ndarray, mode: str) -> onp.ndarra
     return unpad(opened.view(bool), unpad_width)
 
 
+def toplogy_preserving_binary_erosion(x: onp.ndarray) -> onp.ndarray:
+    """Erodes the borders of solid features in `x` while preserving the topology.
+
+    Args:
+        x: Bool-typed rank-2 array to be transformed.
+
+    Returns:
+        The array with eroded features.
+    """
+    eroded = cv2.erode(
+        src=x.view(onp.uint8),
+        kernel=PLUS_KERNEL.view(onp.uint8),
+        borderType=cv2.BORDER_REPLICATE,
+    )
+    dilated_eroded = cv2.dilate(
+        src=eroded,
+        kernel=PLUS_KERNEL.view(onp.uint8),
+        borderType=cv2.BORDER_REPLICATE,
+    )
+    return (x & ~dilated_eroded.view(bool)) | eroded.view(bool)
+
+
 def count_neighbors(x: onp.ndarray) -> onp.ndarray:
     """Counts the solid neighbors of each pixel in `x`."""
     assert x.dtype == bool
@@ -403,10 +353,7 @@ def unpad(
 ) -> onp.ndarray:
     """Undoes a pad operation."""
     slices = tuple(
-        [
-            slice(pad_lo, dim - pad_hi)
-            for (pad_lo, pad_hi), dim in zip(pad_width, x.shape)
-        ]
+        slice(pad_lo, dim - pad_hi) for (pad_lo, pad_hi), dim in zip(pad_width, x.shape)
     )
     return x[slices]
 
