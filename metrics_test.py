@@ -77,12 +77,6 @@ TEST_KERNEL_4_3_ASYMMETRIC = onp.array(
 TEST_KERNELS = [TEST_KERNEL_4, TEST_KERNEL_5, TEST_KERNEL_4_3_ASYMMETRIC]
 
 
-IGNORE_NONE = [(None, ())]
-IGNORE_PENINSULAS = [(None, (1,))]
-ignore_edges = [(None, (0, 1, 2, 3))]
-IGNORE_CORNERS = [(None, (2,))]
-
-
 class LengthScaleTest(unittest.TestCase):
     @parameterized.parameterized.expand(
         [
@@ -93,115 +87,175 @@ class LengthScaleTest(unittest.TestCase):
     )
     def test_length_scale_matches_expected(self, x, expected_solid, expected_void):
         length_scale_solid, length_scale_void = metrics.minimum_length_scale(
-            x, ignore_edges=False
+            x, ignore_scheme=metrics.IgnoreScheme.NONE
         )
         self.assertEqual(length_scale_solid, expected_solid)
         self.assertEqual(length_scale_void, expected_void)
 
-    @parameterized.parameterized.expand([[i] for i in range(1, 20)])
-    def test_circle_has_expected_length_scale(self, length_scale):
-        # Make an array that has a single solid circular feature with diameter equal
-        # to the length scale. Pad to make sure the feature is isolated.
+    @parameterized.parameterized.expand(
+        list(
+            itertools.product(
+                [i for i in range(1, 20)],
+                [metrics.IgnoreScheme.NONE, metrics.IgnoreScheme.LARGE_FEATURE_EDGES],
+            )
+        )
+    )
+    def test_circle_has_expected_length_scale(self, length_scale, ignore_scheme):
+        # With `NONE` and `LARGE_FEATURE_EDGES` ignore schemes, even small length
+        # scales will correctly be identified.
         x = metrics.kernel_for_length_scale(length_scale)
         x = onp.pad(x, ((1, 1), (1, 1)), mode="constant")
-        length_scale_solid, length_scale_void = metrics.minimum_length_scale(x)
-        self.assertEqual(length_scale_solid, length_scale)
-        self.assertEqual(length_scale_void, min(x.shape))
+        with self.subTest("solid_circle"):
+            length_scale_solid, length_scale_void = metrics.minimum_length_scale(
+                x, ignore_scheme
+            )
+            self.assertEqual(length_scale_solid, length_scale)
+            self.assertEqual(length_scale_void, min(x.shape))
+        with self.subTest("void_circle"):
+            length_scale_solid, length_scale_void = metrics.minimum_length_scale(
+                ~x, ignore_scheme
+            )
+            self.assertEqual(length_scale_void, length_scale)
+            self.assertEqual(length_scale_solid, min(x.shape))
 
-    @parameterized.parameterized.expand([[i] for i in range(1, 20)])
-    def test_hole_has_expected_length_scale(self, length_scale):
-        # Make an array that has a single void circular feature with diameter equal
-        # to the length scale. Pad to make sure the feature is isolated.
+    @parameterized.parameterized.expand([[i] for i in range(5, 20)])
+    def test_circle_has_expected_length_scale_ignore_edges(self, length_scale):
+        # With the `EDGES` ignore scheme, we will be blind to small features.
+        # Check only for features larger than 5 pixels in size.
         x = metrics.kernel_for_length_scale(length_scale)
         x = onp.pad(x, ((1, 1), (1, 1)), mode="constant")
-        length_scale_solid, length_scale_void = metrics.minimum_length_scale(~x)
-        self.assertEqual(length_scale_void, length_scale)
-        self.assertEqual(length_scale_solid, min(x.shape))
+        with self.subTest("solid_circle"):
+            length_scale_solid, length_scale_void = metrics.minimum_length_scale(
+                x, ignore_scheme=metrics.IgnoreScheme.EDGES
+            )
+            self.assertEqual(length_scale_solid, length_scale)
+            self.assertEqual(length_scale_void, min(x.shape))
+        with self.subTest("void_circle"):
+            length_scale_solid, length_scale_void = metrics.minimum_length_scale(
+                ~x, ignore_scheme=metrics.IgnoreScheme.EDGES
+            )
+            self.assertEqual(length_scale_void, length_scale)
+            self.assertEqual(length_scale_solid, min(x.shape))
 
-    @parameterized.parameterized.expand([[i] for i in range(1, 20)])
-    def test_line_has_expected_length_scale(self, length_scale):
+    @parameterized.parameterized.expand(
+        list(
+            itertools.product(
+                list(range(1, 20)),
+                [metrics.IgnoreScheme.NONE, metrics.IgnoreScheme.LARGE_FEATURE_EDGES],
+            )
+        )
+    )
+    def test_line_has_expected_length_scale(self, length_scale, ignore_scheme):
         # Make an array that has a single void circular feature with diameter equal
         # to the length scale. Pad to make sure the feature is isolated.
         x = onp.zeros((40, 40), dtype=bool)
         x[:, 10 : (10 + length_scale)] = True
-        length_scale_solid, length_scale_void = metrics.minimum_length_scale(x)
+        length_scale_solid, length_scale_void = metrics.minimum_length_scale(
+            x, ignore_scheme=ignore_scheme
+        )
         self.assertEqual(length_scale_solid, length_scale)
         self.assertEqual(length_scale_void, min(x.shape))
 
-    def test_brush_violations_with_interface_defects(self):
+    @parameterized.parameterized.expand(
+        [[metrics.IgnoreScheme.EDGES], [metrics.IgnoreScheme.LARGE_FEATURE_EDGES]]
+    )
+    def test_brush_violations_with_interface_defects(self, ignore_scheme):
         # Assert that there are violations in the defective array.
         assert onp.any(
             metrics.length_scale_violations_solid(
-                TEST_ARRAY_5_WITH_DEFECT, 4, ignore_edges=False
+                TEST_ARRAY_5_WITH_DEFECT,
+                length_scale=4,
+                ignore_scheme=metrics.IgnoreScheme.NONE,
             )
         )
         # Assert that there are no violations if we ignore interfaces.
         assert not onp.any(
             metrics.length_scale_violations_solid(
-                TEST_ARRAY_5_WITH_DEFECT, 4, ignore_edges=True
+                TEST_ARRAY_5_WITH_DEFECT,
+                length_scale=4,
+                ignore_scheme=ignore_scheme,
             )
         )
 
-    def test_solid_feature_shallow_incidence(self):
+    @parameterized.parameterized.expand([[s] for s in metrics.IgnoreScheme])
+    def test_solid_feature_shallow_incidence(self, ignore_scheme):
         # Checks that the length scale for a design having a solid feature that
         # is incident on the design edge with a very shallow angle has a length
         # scale equal to the size of the design.
         x = onp.ones((70, 70), dtype=bool)
         x[-1, 10:] = 0
         x[-2, 20:] = 0
-        length_scale_solid, length_scale_void = metrics.minimum_length_scale(x)
+        length_scale_solid, length_scale_void = metrics.minimum_length_scale(
+            x, ignore_scheme=ignore_scheme
+        )
         self.assertEqual(length_scale_solid, 70)
         self.assertEqual(length_scale_void, 70)
 
     def test_feasibility_gap(self):
-        # Create arrays with diameter-6 and diameter-7 circles, and pad them up
-        # to have the same shape.
+        # Tests that if we have features feasible with size 6 kernel and size 7
+        # kernel, but not both, that a minimum feature size of 6 is reported.
         circle6 = onp.pad(metrics.kernel_for_length_scale(6), ((2, 1), (2, 1)))
         circle7 = onp.pad(metrics.kernel_for_length_scale(7), ((1, 1), (1, 1)))
         # Check that the `circle6` is feasible with `6` but infeasible with `7`.
         self.assertFalse(
             onp.any(
-                metrics.length_scale_violations_solid(circle6, 6, ignore_edges=True)
+                metrics.length_scale_violations_solid(
+                    circle6, 6, metrics.IgnoreScheme.NONE
+                )
             )
         )
         self.assertTrue(
             onp.any(
-                metrics.length_scale_violations_solid(circle6, 7, ignore_edges=True)
+                metrics.length_scale_violations_solid(
+                    circle6, 7, metrics.IgnoreScheme.NONE
+                )
             )
         )
         # Check that the `circle7` is infeasible with `6` but feasible with `7`.
         self.assertTrue(
             onp.any(
-                metrics.length_scale_violations_solid(circle7, 6, ignore_edges=True)
+                metrics.length_scale_violations_solid(
+                    circle7, 6, metrics.IgnoreScheme.NONE
+                )
             )
         )
         self.assertFalse(
             onp.any(
-                metrics.length_scale_violations_solid(circle7, 7, ignore_edges=True)
+                metrics.length_scale_violations_solid(
+                    circle7, 7, metrics.IgnoreScheme.NONE
+                )
             )
         )
         # Check that putting both features in the same design makes it infeasible
         # for `6` and `7`.
         merged = onp.concatenate([circle6, circle7])
         self.assertTrue(
-            onp.any(metrics.length_scale_violations_solid(merged, 6, ignore_edges=True))
+            onp.any(
+                metrics.length_scale_violations_solid(
+                    merged, 6, metrics.IgnoreScheme.NONE
+                )
+            )
         )
         self.assertTrue(
-            onp.any(metrics.length_scale_violations_solid(merged, 7, ignore_edges=True))
+            onp.any(
+                metrics.length_scale_violations_solid(
+                    merged, 7, metrics.IgnoreScheme.NONE
+                )
+            )
         )
         # Check that when allowing for the feasibility gap, the merged design is
         # considered feasible with `6` but infeasible with `7`.
         self.assertFalse(
             onp.any(
                 metrics.length_scale_violations_solid_with_allowance(
-                    merged, 6, ignore_edges=True, feasibility_gap_allowance=2
+                    merged, 6, metrics.IgnoreScheme.NONE, feasibility_gap_allowance=2
                 )
             )
         )
         self.assertTrue(
             onp.any(
                 metrics.length_scale_violations_solid_with_allowance(
-                    merged, 7, ignore_edges=True, feasibility_gap_allowance=2
+                    merged, 7, metrics.IgnoreScheme.NONE, feasibility_gap_allowance=2
                 )
             )
         )
@@ -226,7 +280,7 @@ class KernelTest(unittest.TestCase):
 
     def test_length_scale_3(self):
         onp.testing.assert_array_equal(
-            metrics.kernel_for_length_scale(3), metrics.PLUS_KERNEL
+            metrics.kernel_for_length_scale(3), metrics.PLUS_3_KERNEL
         )
 
 
@@ -237,21 +291,68 @@ class KernelTest(unittest.TestCase):
 
 class MorphologyOperationsTest(unittest.TestCase):
     @parameterized.parameterized.expand(
-        list(itertools.product(TEST_KERNELS, TEST_ARRAYS))
+        list(itertools.product(TEST_ARRAYS, TEST_KERNELS, metrics.PaddingMode))
     )
-    def test_opening_matches_scipy(self, x, kernel):
+    def test_erosion_matches_scipy(self, x, kernel, padding_mode):
         pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
-        x_padded = onp.pad(x, pad_width, mode="edge")
+        if padding_mode == metrics.PaddingMode.EDGE:
+            x_padded = onp.pad(x, pad_width, mode="edge")
+        elif padding_mode == metrics.PaddingMode.SOLID:
+            x_padded = onp.pad(x, pad_width, mode="constant", constant_values=True)
+        elif padding_mode == metrics.PaddingMode.VOID:
+            x_padded = onp.pad(x, pad_width, mode="constant", constant_values=False)
+        expected = ndimage.binary_erosion(x_padded, kernel)
+        expected = expected[
+            pad_width[0][0] : expected.shape[0] - pad_width[0][1],
+            pad_width[1][0] : expected.shape[1] - pad_width[1][1],
+        ]
+        actual = metrics.binary_erosion(x, kernel, padding_mode=padding_mode)
+        onp.testing.assert_array_equal(expected, actual)
+
+    @parameterized.parameterized.expand(
+        list(itertools.product(TEST_ARRAYS, TEST_KERNELS, metrics.PaddingMode))
+    )
+    def test_dilation_matches_scipy(self, x, kernel, padding_mode):
+        pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
+        if padding_mode == metrics.PaddingMode.EDGE:
+            x_padded = onp.pad(x, pad_width, mode="edge")
+        elif padding_mode == metrics.PaddingMode.SOLID:
+            x_padded = onp.pad(x, pad_width, mode="constant", constant_values=True)
+        elif padding_mode == metrics.PaddingMode.VOID:
+            x_padded = onp.pad(x, pad_width, mode="constant", constant_values=False)
+        expected = ndimage.binary_dilation(x_padded, kernel)
+        expected = expected[
+            pad_width[0][0] : expected.shape[0] - pad_width[0][1],
+            pad_width[1][0] : expected.shape[1] - pad_width[1][1],
+        ]
+        actual = metrics.binary_dilation(x, kernel, padding_mode=padding_mode)
+        onp.testing.assert_array_equal(expected, actual)
+
+    @parameterized.parameterized.expand(
+        list(itertools.product(TEST_ARRAYS, TEST_KERNELS, metrics.PaddingMode))
+    )
+    def test_opening_matches_scipy(self, x, kernel, padding_mode):
+        pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
+        if padding_mode == metrics.PaddingMode.EDGE:
+            x_padded = onp.pad(x, pad_width, mode="edge")
+        elif padding_mode == metrics.PaddingMode.SOLID:
+            x_padded = onp.pad(x, pad_width, mode="constant", constant_values=True)
+        elif padding_mode == metrics.PaddingMode.VOID:
+            x_padded = onp.pad(x, pad_width, mode="constant", constant_values=False)
         expected = ndimage.binary_opening(x_padded, kernel)
         expected = expected[
             pad_width[0][0] : expected.shape[0] - pad_width[0][1],
             pad_width[1][0] : expected.shape[1] - pad_width[1][1],
         ]
-        actual = metrics.binary_opening(x, kernel, mode="edge")
+        actual = metrics.binary_opening(x, kernel, padding_mode=padding_mode)
         onp.testing.assert_array_equal(expected, actual)
 
     def test_opening_removes_small_features(self):
-        actual = metrics.binary_opening(TEST_ARRAY_4_5, TEST_KERNEL_5, mode="edge")
+        # Test that a feature that is feasible with a size-4 brush is eliminated
+        # by opening with the size-5 brush.
+        actual = metrics.binary_opening(
+            TEST_ARRAY_4_5, TEST_KERNEL_5, padding_mode=metrics.PaddingMode.EDGE
+        )
         expected = onp.array(
             [
                 [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -265,21 +366,60 @@ class MorphologyOperationsTest(unittest.TestCase):
         )
         onp.testing.assert_array_equal(expected, actual)
 
-    def test_count_neighbors(self):
-        neighbors = metrics.count_neighbors(TEST_ARRAY_5_WITH_DEFECT)
-        expected = onp.array(
-            [
-                [0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0],
-                [0, 2, 2, 3, 2, 2, 0, 0, 0, 0, 0, 0, 0],
-                [1, 2, 4, 4, 4, 1, 1, 0, 0, 0, 0, 1, 1],
-                [1, 3, 4, 4, 3, 3, 0, 0, 0, 0, 2, 2, 3],
-                [1, 2, 4, 4, 4, 1, 1, 0, 0, 1, 2, 4, 4],
-                [0, 2, 2, 3, 2, 2, 0, 0, 0, 1, 3, 4, 4],
-                [0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 3, 4, 4],
-            ],
-        )
-        onp.testing.assert_array_equal(neighbors, expected)
+    @parameterized.parameterized.expand(
+        [
+            [[(0, 0, 1, 0, 0)], [(0, 0, 1, 0, 0)]],
+            [[(0, 0, 1, 1, 0)], [(0, 0, 1, 1, 0)]],
+            [[(0, 0, 1, 1, 1, 0, 0, 0)], [(0, 0, 0, 1, 0, 0, 0, 0)]],
+            [[(0, 0, 0, 0, 0, 0, 0, 1)], [(0, 0, 0, 0, 0, 0, 0, 1)]],
+        ]
+    )
+    def test_erode_large_features_1d(self, x, expected):
+        result = metrics.erode_large_features(onp.asarray(x, dtype=bool))
+        onp.testing.assert_array_equal(result, onp.asarray(expected, dtype=bool))
 
+    @parameterized.parameterized.expand(
+        [
+            (
+                [
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 1, 0, 0, 0, 0],
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                ],
+                [
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                ]
+            ),
+            (
+                [
+                    [1, 1, 1, 1, 1, 1, 1, 1],
+                    [1, 1, 1, 1, 0, 0, 0, 0],
+                    [1, 1, 1, 1, 0, 0, 0, 0],
+                    [1, 1, 1, 1, 0, 0, 0, 0],
+                    [1, 1, 0, 0, 1, 0, 0, 0],
+                    [1, 1, 0, 0, 0, 0, 0, 0],
+                ],
+                [
+                    [1, 1, 1, 0, 0, 1, 1, 1],
+                    [1, 1, 1, 0, 0, 0, 0, 0],
+                    [1, 1, 1, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 0, 0, 0, 0],
+                    [1, 0, 0, 0, 1, 0, 0, 0],
+                    [1, 0, 0, 0, 0, 0, 0, 0],
+                ]
+            )
+        ]
+    )
+    def test_erode_large_features_2d(self, x, expected):
+        result = metrics.erode_large_features(onp.asarray(x, dtype=bool))
+        onp.testing.assert_array_equal(result, onp.asarray(expected, dtype=bool))
+
+
+class PaddingOperationsTest(unittest.TestCase):
     @parameterized.parameterized.expand(
         [
             [((0, 0), (0, 0))],
@@ -292,15 +432,15 @@ class MorphologyOperationsTest(unittest.TestCase):
         x = onp.random.rand(20, 30) > 0.5  # Random binary array.
         with self.subTest("edge"):
             expected = onp.pad(x, pad_width, mode="edge")
-            actual = metrics.pad_2d(x, pad_width, mode="edge")
+            actual = metrics.pad_2d(x, pad_width, metrics.PaddingMode.EDGE)
             onp.testing.assert_array_equal(expected, actual)
         with self.subTest("solid"):
             expected = onp.pad(x, pad_width, constant_values=True)
-            actual = metrics.pad_2d(x, pad_width, mode="solid")
+            actual = metrics.pad_2d(x, pad_width, metrics.PaddingMode.SOLID)
             onp.testing.assert_array_equal(expected, actual)
         with self.subTest("void"):
             expected = onp.pad(x, pad_width, constant_values=False)
-            actual = metrics.pad_2d(x, pad_width, mode="void")
+            actual = metrics.pad_2d(x, pad_width, metrics.PaddingMode.VOID)
             onp.testing.assert_array_equal(expected, actual)
 
     @parameterized.parameterized.expand(
@@ -319,18 +459,6 @@ class MorphologyOperationsTest(unittest.TestCase):
         actual = metrics.unpad(x, pad_width)
         onp.testing.assert_equal(expected.shape, actual.shape)
         onp.testing.assert_array_equal(expected, actual)
-
-    @parameterized.parameterized.expand(
-        [
-            [[(0, 0, 1, 0, 0)], [(0, 0, 1, 0, 0)]],
-            [[(0, 0, 1, 1, 0)], [(0, 0, 1, 1, 0)]],
-            [[(0, 0, 1, 1, 1, 0, 0, 0)], [(0, 0, 0, 1, 0, 0, 0, 0)]],
-            [[(0, 0, 0, 0, 0, 0, 0, 1)], [(0, 0, 0, 0, 0, 0, 0, 1)]],
-        ]
-    )
-    def test_topology_preserving_erosion(self, x, expected):
-        result = metrics.toplogy_preserving_binary_erosion(onp.asarray(x, dtype=bool))
-        onp.testing.assert_array_equal(result, onp.asarray(expected, dtype=bool))
 
 
 # ------------------------------------------------------------------------------
