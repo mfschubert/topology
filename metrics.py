@@ -3,28 +3,43 @@
 from typing import Callable, Tuple
 
 import dataclasses
+import enum
 import functools
 import cv2
 import numpy as onp
 
 
-# The `IgnoreFn` accepts a length scale and an array, and returns a mask
-# indicating the locations at which violations are to be ignored.
-IgnoreFn = Callable[[int, onp.ndarray], onp.ndarray]
-
-# Specifies behavior in searching for the minimum length scale of an array.
 FEASIBILITY_GAP_ALLOWANCE = 5
 
-# "Plus-shaped" kernel used througout.
-PLUS_KERNEL = onp.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], bool)
+PLUS_3_KERNEL = onp.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], bool)
+PLUS_5_KERNEL = onp.array(
+    [
+        [0, 1, 1, 1, 0],
+        [1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1],
+        [1, 1, 1, 1, 1],
+        [0, 1, 1, 1, 0],
+    ],
+    dtype=bool,
+)
+SQUARE_3_KERNEL = onp.ones((3, 3), dtype=bool)
 
-# "Neighbor" kernel used to identify neighbors of a pixel.
-NEIGHBOR_KERNEL = onp.array([[0, 1, 0], [1, 0, 1], [0, 1, 0]], bool)
+@enum.unique
+class IgnoreScheme(enum.Enum):
+    """Enumerates schemes for ignoring length scale violations."""
 
-# Padding modes.
-_MODE_EDGE = "edge"
-_MODE_SOLID = "solid"
-_MODE_VOID = "void"
+    NONE = "none"
+    EDGES = "edges"
+    LARGE_FEATURE_EDGES = "large_feature_edges"
+
+
+@enum.unique
+class PaddingMode(enum.Enum):
+    """Enumerates padding modes for arrays."""
+
+    EDGE = "edge"
+    SOLID = "solid"
+    VOID = "void"
 
 
 # ------------------------------------------------------------------------------
@@ -34,7 +49,7 @@ _MODE_VOID = "void"
 
 def minimum_length_scale(
     x: onp.ndarray,
-    ignore_edges: bool = True,
+    ignore_scheme: IgnoreScheme = IgnoreScheme.EDGES,
     feasibility_gap_allowance: int = FEASIBILITY_GAP_ALLOWANCE,
 ) -> Tuple[int, int]:
     """Identifies the minimum length scale of solid and void features in `x`.
@@ -47,39 +62,37 @@ def minimum_length_scale(
 
     In some cases, an array that can be creatied with a brush of size `n` cannot
     be created with the samller brush if size `n - 1`. Further, small pixel-scale
-    violations at interfaces between large features may be unimportant. Some
-    allowance for these is provided via optional arguments to this function.
+    violations at edges of features may be unimportant. Some allowance for these
+    is provided via optional arguments to this function.
 
     Args:
         x: Bool-typed rank-2 array containing the features.
-        ignore_edges: Determines whether violations for pixels at the edges of
-            features are to be ignored.
+        ignore_scheme: Specifies what pixels are ignored when detecting violations.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
             e.g. some features realizable with a brush `n + k` may not be realizable
             with the brush of size `n`. The `feasibility_gap_allowance is the
-            maximum value of `k` used.
+            maximum value of `k` checked.
 
     Returns:
       The detected minimum length scales `(length_scale_solid, length_scale_void)`.
     """
     return (
-        minimum_length_scale_solid(x, ignore_edges, feasibility_gap_allowance),
-        minimum_length_scale_solid(~x, ignore_edges, feasibility_gap_allowance),
+        minimum_length_scale_solid(x, ignore_scheme, feasibility_gap_allowance),
+        minimum_length_scale_solid(~x, ignore_scheme, feasibility_gap_allowance),
     )
 
 
 def minimum_length_scale_solid(
     x: onp.ndarray,
-    ignore_edges: bool,
+    ignore_scheme: IgnoreScheme,
     feasibility_gap_allowance: int,
 ) -> int:
     """Identifies the minimum length scale of solid features in `x`.
 
     Args:
         x: Bool-typed rank-2 array containing the features.
-        ignore_edges: Determines whether violations for pixels at the edges of
-            features are to be ignored.
+        ignore_scheme: Specifies what pixels are ignored when detecting violations.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
             e.g. some features realizable with a brush `n + k` may not be realizable
@@ -96,7 +109,7 @@ def minimum_length_scale_solid(
             length_scale_violations_solid_with_allowance(
                 x=x,
                 length_scale=length_scale,
-                ignore_edges=ignore_edges,
+                ignore_scheme=ignore_scheme,
                 feasibility_gap_allowance=feasibility_gap_allowance,
             )
         )
@@ -112,7 +125,7 @@ def minimum_length_scale_solid(
 def length_scale_violations_solid_with_allowance(
     x: onp.ndarray,
     length_scale: int,
-    ignore_edges: bool,
+    ignore_scheme: IgnoreScheme,
     feasibility_gap_allowance: int,
 ) -> onp.ndarray:
     """Computes the length scale violations, allowing for the feasibility gap.
@@ -120,8 +133,7 @@ def length_scale_violations_solid_with_allowance(
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
-        ignore_edges: Determines whether violations for pixels at the edges of
-            features are to be ignored.
+        ignore_scheme: Specifies what pixels are ignored when detecting violations.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
             e.g. some features realizable with a brush `n + k` may not be realizable
@@ -133,7 +145,7 @@ def length_scale_violations_solid_with_allowance(
     """
     violations = []
     for scale in range(length_scale, length_scale + feasibility_gap_allowance):
-        violations.append(length_scale_violations_solid(x, scale, ignore_edges))
+        violations.append(length_scale_violations_solid(x, scale, ignore_scheme))
     violations = onp.stack(violations, axis=0)
     return onp.all(violations, axis=0)
 
@@ -141,15 +153,14 @@ def length_scale_violations_solid_with_allowance(
 def length_scale_violations_solid(
     x: onp.ndarray,
     length_scale: int,
-    ignore_edges: bool,
+    ignore_scheme: IgnoreScheme,
 ) -> onp.ndarray:
     """Identifies length scale violations of solid features in `x`.
 
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
-        ignore_edges: Determines whether violations for pixels at the edges of
-            features are to be ignored.
+        ignore_scheme: Specifies what pixels are ignored when detecting violations.
 
     Returns:
         The array containing violations.
@@ -157,7 +168,7 @@ def length_scale_violations_solid(
     violations = _length_scale_violations_solid(
         wrapped_x=_HashableArray(x),
         length_scale=length_scale,
-        ignore_edges=ignore_edges,
+        ignore_scheme=ignore_scheme,
     )
     assert violations.shape == x.shape
     return violations
@@ -182,29 +193,26 @@ class _HashableArray:
 def _length_scale_violations_solid(
     wrapped_x: _HashableArray,
     length_scale: int,
-    ignore_edges: bool,
+    ignore_scheme: IgnoreScheme,
 ) -> onp.ndarray:
     """Identifies length scale violations of solid features in `x`.
 
     This function is strict, in the sense that no violations are ignored.
 
     Args:
-        x: Bool-typed rank-2 array containing the features.
+        wrapped_x: The wrapped bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
-        ignore_edges: Determines whether violations for pixels at the edges of
-            features are to be ignored.
+        ignore_scheme: Specifies what pixels are ignored when detecting violations.
 
     Returns:
         The array containing violations.
     """
     x = wrapped_x.array
     kernel = kernel_for_length_scale(length_scale)
-    violations_solid = x & ~binary_opening(x, kernel, mode=_MODE_SOLID)
+    violations_solid = x & ~binary_opening(x, kernel, PaddingMode.SOLID)
 
-    if ignore_edges:
-        ignored = x & ~toplogy_preserving_binary_erosion(x)
-        violations_solid = violations_solid & ~ignored
-
+    ignored = ignored_pixels(x, ignore_scheme)
+    violations_solid = violations_solid & ~ignored
     return violations_solid
 
 
@@ -226,10 +234,34 @@ def kernel_for_length_scale(length_scale: int) -> onp.ndarray:
     centers = onp.arange(-length_scale / 2 + 0.5, length_scale / 2)
     squared_distance = centers[:, onp.newaxis] ** 2 + centers[onp.newaxis, :] ** 2
     kernel = squared_distance < (length_scale / 2) ** 2
-    # Ensure that the kernel can be realized with a width-3 brush.
+    # Ensure that kernels larger than `2` can be realized with a width-3 brush.
     if length_scale > 2:
-        kernel = binary_opening(kernel, PLUS_KERNEL, mode=_MODE_VOID)
+        kernel = binary_opening(kernel, PLUS_3_KERNEL, PaddingMode.VOID)
     return kernel
+
+
+def ignored_pixels(
+    x: onp.ndarray,
+    ignore_scheme: IgnoreScheme,
+) -> onp.ndarray:
+    """Returns an array indicating locations at which violations are to be ignored.
+
+    Args:
+        x: The array for which ignored locations are to be identified.
+        ignore_scheme: Specifies the manner in which ignored locations are identified.
+
+    Returns:
+        The array indicating locations to be ignored.
+    """
+    assert x.dtype == bool
+    if ignore_scheme == IgnoreScheme.NONE:
+        return onp.zeros_like(x)
+    elif ignore_scheme == IgnoreScheme.EDGES:
+        return x & ~binary_erosion(x, PLUS_3_KERNEL, PaddingMode.SOLID)
+    elif ignore_scheme == IgnoreScheme.LARGE_FEATURE_EDGES:
+        return x & ~erode_large_features(x)
+    else:
+        raise ValueError(f"Unknown `ignore_scheme`, got {ignore_scheme}.")
 
 
 # ------------------------------------------------------------------------------
@@ -237,73 +269,119 @@ def kernel_for_length_scale(length_scale: int) -> onp.ndarray:
 # ------------------------------------------------------------------------------
 
 
-def binary_opening(x: onp.ndarray, kernel: onp.ndarray, mode: str) -> onp.ndarray:
-    """Performs binary opening with the given `kernel` and edge-mode padding.
-
-    The edge-mode padding ensures that small features at the border of `x` are
-    not removed.
-
-    Args:
-        x: Bool-typed rank-2 array to be transformed.
-        kernel: Bool-typed rank-2 array containing the kernel.
-        mode: The padding mode to be used. See `pad_2d` for details.
-
-    Returns:
-        The transformed array.
-    """
+def binary_opening(
+    x: onp.ndarray, kernel: onp.ndarray, padding_mode: PaddingMode
+) -> onp.ndarray:
+    """Performs binary opening with the given `kernel` and padding mode."""
     assert x.ndim == 2
     assert x.dtype == bool
     assert kernel.ndim == 2
     assert kernel.dtype == bool
-    pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
-    # Even-size kernels lead to shifts in the image content, which we need to
-    # correct by a shifted unpadding.
-    unpad_width = (
-        (
-            kernel.shape[0] + (kernel.shape[0] + 1) % 2,
-            kernel.shape[0] - (kernel.shape[0] + 1) % 2,
-        ),
-        (
-            kernel.shape[1] + (kernel.shape[1] + 1) % 2,
-            kernel.shape[1] - (kernel.shape[1] + 1) % 2,
-        ),
-    )
+    # The `cv2` convention for binary opening yields a shifted output with
+    # even-shape kernels, requiring padding and unpadding to differ.
+    pad_width, unpad_width = _pad_width_for_kernel_shape(kernel.shape)
     opened = cv2.morphologyEx(
-        src=pad_2d(x, pad_width, mode=mode).view(onp.uint8),
+        src=pad_2d(x, pad_width, padding_mode).view(onp.uint8),
         kernel=kernel.view(onp.uint8),
         op=cv2.MORPH_OPEN,
     )
     return unpad(opened.view(bool), unpad_width)
 
 
-def toplogy_preserving_binary_erosion(x: onp.ndarray) -> onp.ndarray:
-    """Erodes the borders of solid features in `x` while preserving the topology.
+def binary_erosion(
+    x: onp.ndarray, kernel: onp.ndarray, padding_mode: PaddingMode
+) -> onp.ndarray:
+    """Performs binary erosion with structuring element `kernel`."""
+    assert x.dtype == bool
+    assert kernel.dtype == bool
+    pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
+    eroded = cv2.erode(
+        src=pad_2d(x, pad_width, padding_mode).view(onp.uint8),
+        kernel=kernel.view(onp.uint8),
+    )
+    return unpad(eroded.view(bool), pad_width)
+
+
+def binary_dilation(
+    x: onp.ndarray, kernel: onp.ndarray, padding_mode: PaddingMode
+) -> onp.ndarray:
+    """Performs binary dilation with structuring element `kernel`."""
+    assert x.dtype == bool
+    assert kernel.dtype == bool
+    # The `cv2` convention for binary dilation yields a shifted output with
+    # even-shape kernels, requiring padding and unpadding to differ.
+    pad_width, unpad_width = _pad_width_for_kernel_shape(kernel.shape)
+    dilated = cv2.dilate(
+        src=pad_2d(x, pad_width, padding_mode).view(onp.uint8),
+        kernel=kernel.view(onp.uint8),
+    )
+    return unpad(dilated.view(bool), unpad_width)
+
+
+_Padding = Tuple[Tuple[int, int], Tuple[int, int]]
+
+
+def _pad_width_for_kernel_shape(shape: Tuple[int, int]) -> Tuple[_Padding, _Padding]:
+    """Prepares `pad_width` and `unpad_width` for the given kernel shape."""
+    pad_width = ((shape[0],) * 2, (shape[1],) * 2)
+    unpad_width = (
+        (
+            pad_width[0][0] + (shape[0] + 1) % 2,
+            pad_width[0][1] - (shape[0] + 1) % 2,
+        ),
+        (
+            pad_width[1][0] + (shape[1] + 1) % 2,
+            pad_width[1][1] - (shape[1] + 1) % 2,
+        ),
+    )
+    return pad_width, unpad_width
+
+
+def erode_large_features(x: onp.ndarray) -> onp.ndarray:
+    """Erodes large features while leaving small features untouched.
+
+    Note that this operation can change the topology of `x`, i.e. it
+    may create two disconnected solid features where originally there
+    was a single contiguous feature.
 
     Args:
-        x: Bool-typed rank-2 array to be transformed.
+        x: Bool-typed rank-2 array to be eroded.
 
     Returns:
         The array with eroded features.
     """
-    eroded = cv2.erode(
-        src=x.view(onp.uint8),
-        kernel=PLUS_KERNEL.view(onp.uint8),
-        borderType=cv2.BORDER_REPLICATE,
-    )
-    dilated_eroded = cv2.dilate(
-        src=eroded,
-        kernel=PLUS_KERNEL.view(onp.uint8),
-        borderType=cv2.BORDER_REPLICATE,
-    )
-    return (x & ~dilated_eroded.view(bool)) | eroded.view(bool)
-
-
-def count_neighbors(x: onp.ndarray) -> onp.ndarray:
-    """Counts the solid neighbors of each pixel in `x`."""
     assert x.dtype == bool
+
+    # Identify interior solid pixels, which should not be removed. Pixels for
+    # which the neighborhood sum equals `9` are interior pixels.
+    neighborhood_sum = _filter_2d(x, SQUARE_3_KERNEL)
+    interior_pixels = neighborhood_sum == 9
+
+    # Identify solid pixels that are "near" interior pixels. These are not
+    # interior pixels, but are solid pixels that are within 1 or 2 pixels
+    # of an interior pixel.
+    near_interior_pixels = (
+        x
+        & ~interior_pixels
+        & binary_dilation(
+            x=interior_pixels,
+            kernel=PLUS_5_KERNEL,
+            padding_mode=PaddingMode.EDGE,
+        )
+    )
+
+    # The remaining pixels are those which are interior, or solid pixels which are
+    # not near any interior pixels.
+    return interior_pixels | (x & ~near_interior_pixels)
+
+
+def _filter_2d(x: onp.ndarray, kernel: onp.ndarray) -> onp.ndarray:
+    """Convolves `x` with `kernel`."""
+    assert x.dtype == bool
+    assert kernel.dtype == bool
     return cv2.filter2D(
         src=x.view(onp.uint8),
-        kernel=NEIGHBOR_KERNEL.view(onp.uint8),
+        kernel=kernel.view(onp.uint8),
         ddepth=-1,
         borderType=cv2.BORDER_REPLICATE,
     )
@@ -312,7 +390,7 @@ def count_neighbors(x: onp.ndarray) -> onp.ndarray:
 def pad_2d(
     x: onp.ndarray,
     pad_width: Tuple[Tuple[int, int], Tuple[int, int]],
-    mode: str,
+    padding_mode: PaddingMode,
 ) -> onp.ndarray:
     """Pads rank-2 boolean array `x` with the specified mode.
 
@@ -322,7 +400,7 @@ def pad_2d(
     Args:
         x: The array to be padded.
         pad_width: The extent of the padding, `((i_lo, i_hi), (j_lo, j_hi))`.
-        mode: Either "edge", "solid", or "void".
+        padding_mode: Specifies the padding mode to be used.
 
     Returns:
         The padded array.
@@ -337,14 +415,14 @@ def pad_2d(
         left=left,
         right=right,
     )
-    if mode == _MODE_EDGE:
+    if padding_mode == PaddingMode.EDGE:
         return pad_fn(borderType=cv2.BORDER_REPLICATE).view(bool)
-    elif mode == _MODE_SOLID:
+    elif padding_mode == PaddingMode.SOLID:
         return pad_fn(borderType=cv2.BORDER_CONSTANT, value=1).view(bool)
-    elif mode == _MODE_VOID:
+    elif padding_mode == PaddingMode.VOID:
         return pad_fn(borderType=cv2.BORDER_CONSTANT, value=0).view(bool)
     else:
-        raise ValueError(f"Invalid `mode`, got {mode}.")
+        raise ValueError(f"Invalid `padding_mode`, got {padding_mode}.")
 
 
 def unpad(
