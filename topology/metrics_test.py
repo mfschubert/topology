@@ -6,7 +6,8 @@ import parameterized
 from scipy import ndimage
 import unittest
 
-import metrics
+from topology import metrics
+
 
 TEST_ARRAY_4_5 = onp.array(
     [  # Solid features feasible with circle-4, void with circle-5.
@@ -390,7 +391,7 @@ class MorphologyOperationsTest(unittest.TestCase):
                 [
                     [0, 0, 0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 0, 0, 0, 0, 0],
-                    [0, 0, 0, 0, 0, 0, 0, 0],
+                    [0, 0, 0, 1, 0, 0, 0, 0],
                     [1, 1, 1, 1, 1, 1, 1, 1],
                 ]
             ),
@@ -404,10 +405,10 @@ class MorphologyOperationsTest(unittest.TestCase):
                     [1, 1, 0, 0, 0, 0, 0, 0],
                 ],
                 [
-                    [1, 1, 1, 0, 0, 1, 1, 1],
+                    [1, 1, 1, 1, 0, 1, 1, 1],
                     [1, 1, 1, 0, 0, 0, 0, 0],
                     [1, 1, 1, 0, 0, 0, 0, 0],
-                    [1, 0, 0, 0, 0, 0, 0, 0],
+                    [1, 1, 0, 0, 0, 0, 0, 0],
                     [1, 0, 0, 0, 1, 0, 0, 0],
                     [1, 0, 0, 0, 0, 0, 0, 0],
                 ]

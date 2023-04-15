@@ -105,7 +105,7 @@ def minimum_length_scale_solid(
     assert x.dtype == bool
 
     def test_fn(length_scale: int) -> bool:
-        return ~onp.any(
+        return ~onp.any(  # type: ignore
             length_scale_violations_solid_with_allowance(
                 x=x,
                 length_scale=length_scale,
@@ -184,7 +184,7 @@ class _HashableArray:
         return hash((self.array.dtype, self.array.shape, self.array.tobytes()))
 
     def __eq__(self, other: "_HashableArray") -> bool:
-        return onp.all(self.array == other.array) and (
+        return onp.all(self.array == other.array) and (  # type: ignore
             self.array.dtype == other.array.dtype
         )
 
@@ -357,10 +357,8 @@ def erode_large_features(x: onp.ndarray) -> onp.ndarray:
     neighborhood_sum = _filter_2d(x, SQUARE_3_KERNEL)
     interior_pixels = neighborhood_sum == 9
 
-    # Identify solid pixels that are "near" interior pixels. These are not
-    # interior pixels, but are solid pixels that are within 1 or 2 pixels
-    # of an interior pixel.
-    near_interior_pixels = (
+    # Identify solid pixels that are adjacent to interior pixels.
+    adjacent_to_interior = (
         x
         & ~interior_pixels
         & binary_dilation(
@@ -370,9 +368,28 @@ def erode_large_features(x: onp.ndarray) -> onp.ndarray:
         )
     )
 
-    # The remaining pixels are those which are interior, or solid pixels which are
-    # not near any interior pixels.
-    return interior_pixels | (x & ~near_interior_pixels)
+    removed_by_erosion = x & ~binary_erosion(x, PLUS_3_KERNEL, PaddingMode.EDGE)
+
+    should_remove = adjacent_to_interior & removed_by_erosion
+
+    return x & ~should_remove
+
+    # # Identify solid pixels that are "near" interior pixels. These are not
+    # # interior pixels, but are solid pixels that are within 1 or 2 pixels
+    # # of an interior pixel.
+    # near_interior_pixels = (
+    #     x
+    #     & ~interior_pixels
+    #     & binary_dilation(
+    #         x=interior_pixels,
+    #         kernel=PLUS_5_KERNEL,
+    #         padding_mode=PaddingMode.EDGE,
+    #     )
+    # )
+
+    # # The remaining pixels are those which are interior, or solid pixels which are
+    # # not near any interior pixels.
+    # return interior_pixels | (x & ~near_interior_pixels)
 
 
 def _filter_2d(x: onp.ndarray, kernel: onp.ndarray) -> onp.ndarray:
@@ -442,7 +459,7 @@ def unpad(
 
 
 def maximum_true_arg(
-    nearly_monotonic_fn: Callable[[onp.ndarray], bool],
+    nearly_monotonic_fn: Callable[[int], bool],
     min_arg: int,
     max_arg: int,
     non_monotonic_allowance: int,
