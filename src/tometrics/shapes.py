@@ -1,12 +1,17 @@
 """Defines functions that generate shapes, useful for testing purposes."""
 
+from typing import Any, Tuple
+
 import numpy as onp
-from scipy import ndimage
+from scipy import ndimage  # type: ignore[import-untyped]
+
+NDArray = onp.ndarray[Any, Any]
+
 
 PLUS_KERNEL = onp.asarray([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
 
 
-def circle(diameter: int, padding: int) -> onp.ndarray:
+def circle(diameter: int, padding: int) -> NDArray:
     """Creates a pixelated circle with the given diameter."""
     _validate_int(diameter, padding)
     if diameter < 1:
@@ -15,7 +20,7 @@ def circle(diameter: int, padding: int) -> onp.ndarray:
     distance_squared = d[:, onp.newaxis] ** 2 + d[onp.newaxis, :] ** 2
     kernel = distance_squared < (diameter / 2) ** 2
     if diameter > 2:
-        # By convention we require that if the diameter is greater than `2`, 
+        # By convention we require that if the diameter is greater than `2`,
         # the kernel must be realizable with the plus-shaped kernel.
         kernel = ndimage.binary_opening(kernel, PLUS_KERNEL)
     return symmetric_pad(kernel, padding)
@@ -26,7 +31,7 @@ def rounded_rectangle(
     height: int,
     diameter: int,
     padding: int,
-) -> onp.ndarray:
+) -> NDArray:
     """Creates a rounded rectangle."""
     _validate_int(width, height, diameter, padding)
     if width < diameter or height < diameter:
@@ -58,7 +63,7 @@ def rounded_angled_rectangle(
     diameter: int,
     angle: float,
     padding: int,
-) -> onp.ndarray:
+) -> NDArray:
     """Creates a rounded rectangle rotated by the specified `angle`."""
     _validate_int(width, height, diameter, padding)
     if width < diameter or height < diameter:
@@ -88,12 +93,12 @@ def rounded_angled_rectangle(
     return symmetric_pad(rectangle, padding)
 
 
-def rounded_square(width: int, diameter: int, padding: int) -> onp.ndarray:
+def rounded_square(width: int, diameter: int, padding: int) -> NDArray:
     """Creates a single rounded square."""
     return rounded_rectangle(width, width, diameter, padding)
 
 
-def checkerboard(width: int, gap: int, diameter: int) -> onp.ndarray:
+def checkerboard(width: int, gap: int, diameter: int) -> NDArray:
     """Creates a 4x4 checkerboard, with tiles having rounded corners."""
     _validate_int(width, gap, diameter)
     square = rounded_square(width, diameter, padding=0)
@@ -110,12 +115,12 @@ def checkerboard(width: int, gap: int, diameter: int) -> onp.ndarray:
     return onp.pad(x, ((gap, 0), (gap, 0)))
 
 
-def symmetric_pad(x: onp.ndarray, padding: int) -> onp.ndarray:
+def symmetric_pad(x: NDArray, padding: int) -> NDArray:
     """Symmetrically pads `x` by the specified amount."""
     return onp.pad(x, ((padding, padding), (padding, padding)))
 
 
-def _rotate(x: onp.ndarray, y: onp.ndarray, angle: onp.ndarray) -> onp.ndarray:
+def _rotate(x: NDArray, y: NDArray, angle: float | NDArray) -> Tuple[NDArray, NDArray]:
     """Rotates `(x, y)` by the specified angle."""
     magnitude = onp.sqrt(x**2 + y**2)
     xy_angle = onp.angle(x + 1j * y)
@@ -123,13 +128,13 @@ def _rotate(x: onp.ndarray, y: onp.ndarray, angle: onp.ndarray) -> onp.ndarray:
     return rot.real, rot.imag
 
 
-def trim_zeros(x: onp.ndarray) -> onp.ndarray:
+def trim_zeros(x: NDArray) -> NDArray:
     """Trims the nonzero elements from `x`."""
     i, j = onp.nonzero(x)
     return x[onp.amin(i) : onp.amax(i) + 1, onp.amin(j) : onp.amax(j) + 1]
 
 
-def _validate_int(*args):
+def _validate_int(*args: Any) -> None:
     """Validates that all arguments are integers."""
     if any([not isinstance(x, int) for x in args]):
         raise ValueError(f"Expected ints but got types {[x.type for x in args]}")

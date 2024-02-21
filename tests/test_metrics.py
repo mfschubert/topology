@@ -1,13 +1,13 @@
 """Tests for `metrics`."""
 
 import itertools
+import unittest
+
 import numpy as onp
 import parameterized
 from scipy import ndimage
-import unittest
 
-from topology import metrics
-
+from tometrics import metrics
 
 TEST_ARRAY_4_5 = onp.array(
     [  # Solid features feasible with circle-4, void with circle-5.
@@ -393,7 +393,7 @@ class MorphologyOperationsTest(unittest.TestCase):
                     [0, 0, 0, 0, 0, 0, 0, 0],
                     [0, 0, 0, 1, 0, 0, 0, 0],
                     [1, 1, 1, 1, 1, 1, 1, 1],
-                ]
+                ],
             ),
             (
                 [
@@ -411,8 +411,8 @@ class MorphologyOperationsTest(unittest.TestCase):
                     [1, 1, 0, 0, 0, 0, 0, 0],
                     [1, 0, 0, 0, 1, 0, 0, 0],
                     [1, 0, 0, 0, 0, 0, 0, 0],
-                ]
-            )
+                ],
+            ),
         ]
     )
     def test_erode_large_features_2d(self, x, expected):
