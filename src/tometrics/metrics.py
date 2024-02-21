@@ -1,17 +1,19 @@
 """Defines functions that compute metrics for two-dimensional density arrays."""
 
-from typing import Callable, Tuple
-
 import dataclasses
 import enum
 import functools
+from typing import Any, Callable, Tuple
+
 import cv2
 import numpy as onp
+
+NDArray = onp.ndarray[Any, Any]
 
 
 FEASIBILITY_GAP_ALLOWANCE = 5
 
-PLUS_3_KERNEL = onp.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], bool)
+PLUS_3_KERNEL = onp.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=bool)
 PLUS_5_KERNEL = onp.array(
     [
         [0, 1, 1, 1, 0],
@@ -23,6 +25,7 @@ PLUS_5_KERNEL = onp.array(
     dtype=bool,
 )
 SQUARE_3_KERNEL = onp.ones((3, 3), dtype=bool)
+
 
 @enum.unique
 class IgnoreScheme(enum.Enum):
@@ -48,7 +51,7 @@ class PaddingMode(enum.Enum):
 
 
 def minimum_length_scale(
-    x: onp.ndarray,
+    x: NDArray,
     ignore_scheme: IgnoreScheme = IgnoreScheme.EDGES,
     feasibility_gap_allowance: int = FEASIBILITY_GAP_ALLOWANCE,
 ) -> Tuple[int, int]:
@@ -75,7 +78,7 @@ def minimum_length_scale(
             maximum value of `k` checked.
 
     Returns:
-      The detected minimum length scales `(length_scale_solid, length_scale_void)`.
+        The detected minimum length scales `(length_scale_solid, length_scale_void)`.
     """
     return (
         minimum_length_scale_solid(x, ignore_scheme, feasibility_gap_allowance),
@@ -84,7 +87,7 @@ def minimum_length_scale(
 
 
 def minimum_length_scale_solid(
-    x: onp.ndarray,
+    x: NDArray,
     ignore_scheme: IgnoreScheme,
     feasibility_gap_allowance: int,
 ) -> int:
@@ -123,11 +126,11 @@ def minimum_length_scale_solid(
 
 
 def length_scale_violations_solid_with_allowance(
-    x: onp.ndarray,
+    x: NDArray,
     length_scale: int,
     ignore_scheme: IgnoreScheme,
     feasibility_gap_allowance: int,
-) -> onp.ndarray:
+) -> NDArray:
     """Computes the length scale violations, allowing for the feasibility gap.
 
     Args:
@@ -146,15 +149,15 @@ def length_scale_violations_solid_with_allowance(
     violations = []
     for scale in range(length_scale, length_scale + feasibility_gap_allowance):
         violations.append(length_scale_violations_solid(x, scale, ignore_scheme))
-    violations = onp.stack(violations, axis=0)
-    return onp.all(violations, axis=0)
+    length_scale_violations: NDArray = onp.all(violations, axis=0)
+    return length_scale_violations
 
 
 def length_scale_violations_solid(
-    x: onp.ndarray,
+    x: NDArray,
     length_scale: int,
     ignore_scheme: IgnoreScheme,
-) -> onp.ndarray:
+) -> NDArray:
     """Identifies length scale violations of solid features in `x`.
 
     Args:
@@ -178,12 +181,14 @@ def length_scale_violations_solid(
 class _HashableArray:
     """Hashable wrapper for numpy arrays."""
 
-    array: onp.ndarray
+    array: NDArray
 
     def __hash__(self) -> int:
         return hash((self.array.dtype, self.array.shape, self.array.tobytes()))
 
-    def __eq__(self, other: "_HashableArray") -> bool:
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, _HashableArray):
+            return False
         return onp.all(self.array == other.array) and (  # type: ignore
             self.array.dtype == other.array.dtype
         )
@@ -194,7 +199,7 @@ def _length_scale_violations_solid(
     wrapped_x: _HashableArray,
     length_scale: int,
     ignore_scheme: IgnoreScheme,
-) -> onp.ndarray:
+) -> NDArray:
     """Identifies length scale violations of solid features in `x`.
 
     This function is strict, in the sense that no violations are ignored.
@@ -216,7 +221,7 @@ def _length_scale_violations_solid(
     return violations_solid
 
 
-def kernel_for_length_scale(length_scale: int) -> onp.ndarray:
+def kernel_for_length_scale(length_scale: int) -> NDArray:
     """Returns an approximately circular kernel for the given `length_scale`.
 
     The kernel has shape `(length_scale, length_scale)`, and is `True` for pixels
@@ -241,9 +246,9 @@ def kernel_for_length_scale(length_scale: int) -> onp.ndarray:
 
 
 def ignored_pixels(
-    x: onp.ndarray,
+    x: NDArray,
     ignore_scheme: IgnoreScheme,
-) -> onp.ndarray:
+) -> NDArray:
     """Returns an array indicating locations at which violations are to be ignored.
 
     Args:
@@ -269,9 +274,7 @@ def ignored_pixels(
 # ------------------------------------------------------------------------------
 
 
-def binary_opening(
-    x: onp.ndarray, kernel: onp.ndarray, padding_mode: PaddingMode
-) -> onp.ndarray:
+def binary_opening(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
     """Performs binary opening with the given `kernel` and padding mode."""
     assert x.ndim == 2
     assert x.dtype == bool
@@ -288,9 +291,7 @@ def binary_opening(
     return unpad(opened.view(bool), unpad_width)
 
 
-def binary_erosion(
-    x: onp.ndarray, kernel: onp.ndarray, padding_mode: PaddingMode
-) -> onp.ndarray:
+def binary_erosion(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
     """Performs binary erosion with structuring element `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
@@ -302,9 +303,7 @@ def binary_erosion(
     return unpad(eroded.view(bool), pad_width)
 
 
-def binary_dilation(
-    x: onp.ndarray, kernel: onp.ndarray, padding_mode: PaddingMode
-) -> onp.ndarray:
+def binary_dilation(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
     """Performs binary dilation with structuring element `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
@@ -321,8 +320,9 @@ def binary_dilation(
 _Padding = Tuple[Tuple[int, int], Tuple[int, int]]
 
 
-def _pad_width_for_kernel_shape(shape: Tuple[int, int]) -> Tuple[_Padding, _Padding]:
+def _pad_width_for_kernel_shape(shape: Tuple[int, ...]) -> Tuple[_Padding, _Padding]:
     """Prepares `pad_width` and `unpad_width` for the given kernel shape."""
+    assert len(shape) == 2
     pad_width = ((shape[0],) * 2, (shape[1],) * 2)
     unpad_width = (
         (
@@ -337,7 +337,7 @@ def _pad_width_for_kernel_shape(shape: Tuple[int, int]) -> Tuple[_Padding, _Padd
     return pad_width, unpad_width
 
 
-def erode_large_features(x: onp.ndarray) -> onp.ndarray:
+def erode_large_features(x: NDArray) -> NDArray:
     """Erodes large features while leaving small features untouched.
 
     Note that this operation can change the topology of `x`, i.e. it
@@ -354,7 +354,7 @@ def erode_large_features(x: onp.ndarray) -> onp.ndarray:
 
     # Identify interior solid pixels, which should not be removed. Pixels for
     # which the neighborhood sum equals `9` are interior pixels.
-    neighborhood_sum = _filter_2d(x, SQUARE_3_KERNEL)
+    neighborhood_sum = _filter_2d(x, SQUARE_3_KERNEL, PaddingMode.EDGE)
     interior_pixels = neighborhood_sum == 9
 
     # Identify solid pixels that are adjacent to interior pixels.
@@ -369,46 +369,27 @@ def erode_large_features(x: onp.ndarray) -> onp.ndarray:
     )
 
     removed_by_erosion = x & ~binary_erosion(x, PLUS_3_KERNEL, PaddingMode.EDGE)
-
     should_remove = adjacent_to_interior & removed_by_erosion
-
-    return x & ~should_remove
-
-    # # Identify solid pixels that are "near" interior pixels. These are not
-    # # interior pixels, but are solid pixels that are within 1 or 2 pixels
-    # # of an interior pixel.
-    # near_interior_pixels = (
-    #     x
-    #     & ~interior_pixels
-    #     & binary_dilation(
-    #         x=interior_pixels,
-    #         kernel=PLUS_5_KERNEL,
-    #         padding_mode=PaddingMode.EDGE,
-    #     )
-    # )
-
-    # # The remaining pixels are those which are interior, or solid pixels which are
-    # # not near any interior pixels.
-    # return interior_pixels | (x & ~near_interior_pixels)
+    return onp.asarray(x & ~should_remove)
 
 
-def _filter_2d(x: onp.ndarray, kernel: onp.ndarray) -> onp.ndarray:
+def _filter_2d(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
     """Convolves `x` with `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
     return cv2.filter2D(
         src=x.view(onp.uint8),
         kernel=kernel.view(onp.uint8),
-        ddepth=-1,
+        ddepth=cv2.CV_32F,
         borderType=cv2.BORDER_REPLICATE,
-    )
+    ).astype(int)
 
 
 def pad_2d(
-    x: onp.ndarray,
+    x: NDArray,
     pad_width: Tuple[Tuple[int, int], Tuple[int, int]],
     padding_mode: PaddingMode,
-) -> onp.ndarray:
+) -> NDArray:
     """Pads rank-2 boolean array `x` with the specified mode.
 
     Padding may take values from the edge pixels, or be entirely solid or
@@ -443,9 +424,9 @@ def pad_2d(
 
 
 def unpad(
-    x: onp.ndarray,
+    x: NDArray,
     pad_width: Tuple[Tuple[int, int], ...],
-) -> onp.ndarray:
+) -> NDArray:
     """Undoes a pad operation."""
     slices = tuple(
         slice(pad_lo, dim - pad_hi) for (pad_lo, pad_hi), dim in zip(pad_width, x.shape)
@@ -479,7 +460,8 @@ def maximum_true_arg(
     employed. For this reason, `min_arg` must be positive.
 
     Args:
-        monotonic_fn: The function for which the maximum `True` argument is sought.
+        nearly_monotonic_fn: The function for which the maximum `True` argument is
+            sought.
         min_arg: The minimum argument. Must be positive.
         max_arg: The maximum argument. Must be greater than `min_arg.`
         non_monotonic_allowance: The number of candidate arguments where the
