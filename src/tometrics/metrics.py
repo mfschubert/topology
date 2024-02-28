@@ -414,12 +414,15 @@ def _filter_2d(
     """Convolves `x` with `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
-    return cv2.filter2D(
-        src=x.view(onp.uint8),
+    pad_width, unpad_width = _pad_width_for_kernel_shape(kernel.shape)
+    filtered = cv2.filter2D(
+        src=pad_2d(x, pad_width, periodic, padding_mode).view(onp.uint8),
         kernel=kernel.view(onp.uint8),
         ddepth=cv2.CV_32F,
         borderType=cv2.BORDER_REPLICATE,
-    ).astype(int)
+    )
+    filtered = onp.around(onp.asarray(filtered)).astype(int)
+    return unpad(filtered, unpad_width)
 
 
 def pad_2d(
@@ -444,22 +447,41 @@ def pad_2d(
     """
     assert x.dtype == bool
     ((top, bottom), (left, right)) = pad_width
-    pad_fn = functools.partial(
-        cv2.copyMakeBorder,
+
+    pad_value = 1 if padding_mode == PaddingMode.SOLID else 0
+
+    if periodic[0]:
+        border_type_i = cv2.BORDER_WRAP
+    elif padding_mode == PaddingMode.EDGE:
+        border_type_i = cv2.BORDER_REPLICATE
+    else:
+        border_type_i = cv2.BORDER_CONSTANT
+    x = cv2.copyMakeBorder(  # type: ignore[call-overload]
         src=x.view(onp.uint8),
         top=top,
         bottom=bottom,
+        left=0,
+        right=0,
+        borderType=border_type_i,
+        value=pad_value,
+    )
+
+    if periodic[1]:
+        border_type_j = cv2.BORDER_WRAP
+    elif padding_mode == PaddingMode.EDGE:
+        border_type_j = cv2.BORDER_REPLICATE
+    else:
+        border_type_j = cv2.BORDER_CONSTANT
+    x = cv2.copyMakeBorder(  # type: ignore[call-overload]
+        src=x,
+        top=0,
+        bottom=0,
         left=left,
         right=right,
-    )
-    if padding_mode == PaddingMode.EDGE:
-        return pad_fn(borderType=cv2.BORDER_REPLICATE).view(bool)
-    elif padding_mode == PaddingMode.SOLID:
-        return pad_fn(borderType=cv2.BORDER_CONSTANT, value=1).view(bool)
-    elif padding_mode == PaddingMode.VOID:
-        return pad_fn(borderType=cv2.BORDER_CONSTANT, value=0).view(bool)
-    else:
-        raise ValueError(f"Invalid `padding_mode`, got {padding_mode}.")
+        borderType=border_type_j,
+        value=pad_value,
+    ).view(bool)
+    return onp.asarray(x)
 
 
 def unpad(

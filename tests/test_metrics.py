@@ -4,7 +4,7 @@ import itertools
 import unittest
 
 import numpy as onp
-import parameterized
+from parameterized import parameterized
 from scipy import ndimage
 
 from tometrics import metrics
@@ -79,7 +79,7 @@ TEST_KERNELS = [TEST_KERNEL_4, TEST_KERNEL_5, TEST_KERNEL_4_3_ASYMMETRIC]
 
 
 class LengthScaleTest(unittest.TestCase):
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [
             (TEST_ARRAY_4_5, 4, 5),
             (TEST_ARRAY_5_5, 5, 5),
@@ -93,7 +93,7 @@ class LengthScaleTest(unittest.TestCase):
         self.assertEqual(length_scale_solid, expected_solid)
         self.assertEqual(length_scale_void, expected_void)
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         list(
             itertools.product(
                 [i for i in range(1, 20)],
@@ -119,7 +119,7 @@ class LengthScaleTest(unittest.TestCase):
             self.assertEqual(length_scale_void, length_scale)
             self.assertEqual(length_scale_solid, min(x.shape))
 
-    @parameterized.parameterized.expand([[i] for i in range(5, 20)])
+    @parameterized.expand([[i] for i in range(5, 20)])
     def test_circle_has_expected_length_scale_ignore_edges(self, length_scale):
         # With the `EDGES` ignore scheme, we will be blind to small features.
         # Check only for features larger than 5 pixels in size.
@@ -138,7 +138,7 @@ class LengthScaleTest(unittest.TestCase):
             self.assertEqual(length_scale_void, length_scale)
             self.assertEqual(length_scale_solid, min(x.shape))
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         list(
             itertools.product(
                 list(range(1, 20)),
@@ -157,7 +157,7 @@ class LengthScaleTest(unittest.TestCase):
         self.assertEqual(length_scale_solid, length_scale)
         self.assertEqual(length_scale_void, min(x.shape))
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [[metrics.IgnoreScheme.EDGES], [metrics.IgnoreScheme.LARGE_FEATURE_EDGES]]
     )
     def test_brush_violations_with_interface_defects(self, ignore_scheme):
@@ -180,7 +180,7 @@ class LengthScaleTest(unittest.TestCase):
             )
         )
 
-    @parameterized.parameterized.expand([[s] for s in metrics.IgnoreScheme])
+    @parameterized.expand([[s] for s in metrics.IgnoreScheme])
     def test_solid_feature_shallow_incidence(self, ignore_scheme):
         # Checks that the length scale for a design having a solid feature that
         # is incident on the design edge with a very shallow angle has a length
@@ -251,21 +251,73 @@ class LengthScaleTest(unittest.TestCase):
         self.assertFalse(
             onp.any(
                 metrics.length_scale_violations_solid_with_allowance(
-                    merged, 6, (False, False), metrics.IgnoreScheme.NONE, feasibility_gap_allowance=2
+                    merged,
+                    6,
+                    (False, False),
+                    metrics.IgnoreScheme.NONE,
+                    feasibility_gap_allowance=2,
                 )
             )
         )
         self.assertTrue(
             onp.any(
                 metrics.length_scale_violations_solid_with_allowance(
-                    merged, 7, (False, False), metrics.IgnoreScheme.NONE, feasibility_gap_allowance=2
+                    merged,
+                    7,
+                    (False, False),
+                    metrics.IgnoreScheme.NONE,
+                    feasibility_gap_allowance=2,
                 )
             )
         )
 
 
+class PeriodicLengthScale(unittest.TestCase):
+    @parameterized.expand(range(1, 10))
+    def test_circle_array_length_scale(self, pad_amount):
+        x = metrics.kernel_for_length_scale(20)
+        x = onp.pad(x, ((pad_amount, 0), (pad_amount, 0)))
+        length_scale_not_periodic = metrics.minimum_length_scale(
+            x, periodic=(False, False), ignore_scheme=metrics.IgnoreScheme.NONE
+        )
+        onp.testing.assert_array_equal(length_scale_not_periodic, (20, x.shape[0]))
+
+        length_scale_periodic_both = metrics.minimum_length_scale(
+            x, periodic=(True, True), ignore_scheme=metrics.IgnoreScheme.NONE
+        )
+        onp.testing.assert_array_equal(length_scale_periodic_both, (20, pad_amount))
+
+    @parameterized.expand(range(1, 10))
+    def test_line_array_length_scale(self, pad_amount):
+        x = onp.ones((20, 20))
+        x = onp.pad(x, ((pad_amount, 0), (0, 0))).astype(bool)
+        length_scale_not_periodic = metrics.minimum_length_scale(
+            x, periodic=(False, False), ignore_scheme=metrics.IgnoreScheme.NONE
+        )
+        onp.testing.assert_array_equal(
+            length_scale_not_periodic, (x.shape[0], x.shape[0])
+        )
+
+        length_scale_periodic_x = metrics.minimum_length_scale(
+            x, periodic=(True, False), ignore_scheme=metrics.IgnoreScheme.NONE
+        )
+        onp.testing.assert_array_equal(length_scale_periodic_x, (20, pad_amount))
+
+        length_scale_periodic_y = metrics.minimum_length_scale(
+            x, periodic=(False, True), ignore_scheme=metrics.IgnoreScheme.NONE
+        )
+        onp.testing.assert_array_equal(
+            length_scale_periodic_y, (x.shape[0], x.shape[0])
+        )
+
+        length_scale_periodic_both = metrics.minimum_length_scale(
+            x, periodic=(True, True), ignore_scheme=metrics.IgnoreScheme.NONE
+        )
+        onp.testing.assert_array_equal(length_scale_periodic_both, (20, pad_amount))
+
+
 class KernelTest(unittest.TestCase):
-    @parameterized.parameterized.expand([(4, TEST_KERNEL_4), (5, TEST_KERNEL_5)])
+    @parameterized.expand([(4, TEST_KERNEL_4), (5, TEST_KERNEL_5)])
     def test_kernel_matches_expected(self, length_scale, expected):
         onp.testing.assert_array_equal(
             metrics.kernel_for_length_scale(length_scale), expected
@@ -293,7 +345,7 @@ class KernelTest(unittest.TestCase):
 
 
 class MorphologyOperationsTest(unittest.TestCase):
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         list(itertools.product(TEST_ARRAYS, TEST_KERNELS, metrics.PaddingMode))
     )
     def test_erosion_matches_scipy(self, x, kernel, padding_mode):
@@ -309,10 +361,12 @@ class MorphologyOperationsTest(unittest.TestCase):
             pad_width[0][0] : expected.shape[0] - pad_width[0][1],
             pad_width[1][0] : expected.shape[1] - pad_width[1][1],
         ]
-        actual = metrics.binary_erosion(x, kernel, periodic=(False, False), padding_mode=padding_mode)
+        actual = metrics.binary_erosion(
+            x, kernel, periodic=(False, False), padding_mode=padding_mode
+        )
         onp.testing.assert_array_equal(expected, actual)
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         list(itertools.product(TEST_ARRAYS, TEST_KERNELS, metrics.PaddingMode))
     )
     def test_dilation_matches_scipy(self, x, kernel, padding_mode):
@@ -328,10 +382,12 @@ class MorphologyOperationsTest(unittest.TestCase):
             pad_width[0][0] : expected.shape[0] - pad_width[0][1],
             pad_width[1][0] : expected.shape[1] - pad_width[1][1],
         ]
-        actual = metrics.binary_dilation(x, kernel, periodic=(False, False), padding_mode=padding_mode)
+        actual = metrics.binary_dilation(
+            x, kernel, periodic=(False, False), padding_mode=padding_mode
+        )
         onp.testing.assert_array_equal(expected, actual)
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         list(itertools.product(TEST_ARRAYS, TEST_KERNELS, metrics.PaddingMode))
     )
     def test_opening_matches_scipy(self, x, kernel, padding_mode):
@@ -347,14 +403,19 @@ class MorphologyOperationsTest(unittest.TestCase):
             pad_width[0][0] : expected.shape[0] - pad_width[0][1],
             pad_width[1][0] : expected.shape[1] - pad_width[1][1],
         ]
-        actual = metrics.binary_opening(x, kernel, periodic=(False, False), padding_mode=padding_mode)
+        actual = metrics.binary_opening(
+            x, kernel, periodic=(False, False), padding_mode=padding_mode
+        )
         onp.testing.assert_array_equal(expected, actual)
 
     def test_opening_removes_small_features(self):
         # Test that a feature that is feasible with a size-4 brush is eliminated
         # by opening with the size-5 brush.
         actual = metrics.binary_opening(
-            TEST_ARRAY_4_5, TEST_KERNEL_5, periodic=(False, False), padding_mode=metrics.PaddingMode.EDGE
+            TEST_ARRAY_4_5,
+            TEST_KERNEL_5,
+            periodic=(False, False),
+            padding_mode=metrics.PaddingMode.EDGE,
         )
         expected = onp.array(
             [
@@ -369,7 +430,7 @@ class MorphologyOperationsTest(unittest.TestCase):
         )
         onp.testing.assert_array_equal(expected, actual)
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [
             [[(0, 0, 1, 0, 0)], [(0, 0, 1, 0, 0)]],
             [[(0, 0, 1, 1, 0)], [(0, 0, 1, 1, 0)]],
@@ -378,10 +439,12 @@ class MorphologyOperationsTest(unittest.TestCase):
         ]
     )
     def test_erode_large_features_1d(self, x, expected):
-        result = metrics.erode_large_features(onp.asarray(x, dtype=bool), periodic=(False, False))
+        result = metrics.erode_large_features(
+            onp.asarray(x, dtype=bool), periodic=(False, False)
+        )
         onp.testing.assert_array_equal(result, onp.asarray(expected, dtype=bool))
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [
             (
                 [
@@ -418,12 +481,14 @@ class MorphologyOperationsTest(unittest.TestCase):
         ]
     )
     def test_erode_large_features_2d(self, x, expected):
-        result = metrics.erode_large_features(onp.asarray(x, dtype=bool), periodic=(False, False))
+        result = metrics.erode_large_features(
+            onp.asarray(x, dtype=bool), periodic=(False, False)
+        )
         onp.testing.assert_array_equal(result, onp.asarray(expected, dtype=bool))
 
 
 class PaddingOperationsTest(unittest.TestCase):
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [
             [((0, 0), (0, 0))],
             [((1, 5), (2, 4))],
@@ -435,18 +500,24 @@ class PaddingOperationsTest(unittest.TestCase):
         x = onp.random.rand(20, 30) > 0.5  # Random binary array.
         with self.subTest("edge"):
             expected = onp.pad(x, pad_width, mode="edge")
-            actual = metrics.pad_2d(x, pad_width, (False, False), metrics.PaddingMode.EDGE)
+            actual = metrics.pad_2d(
+                x, pad_width, (False, False), metrics.PaddingMode.EDGE
+            )
             onp.testing.assert_array_equal(expected, actual)
         with self.subTest("solid"):
             expected = onp.pad(x, pad_width, constant_values=True)
-            actual = metrics.pad_2d(x, pad_width, (False, False), metrics.PaddingMode.SOLID)
+            actual = metrics.pad_2d(
+                x, pad_width, (False, False), metrics.PaddingMode.SOLID
+            )
             onp.testing.assert_array_equal(expected, actual)
         with self.subTest("void"):
             expected = onp.pad(x, pad_width, constant_values=False)
-            actual = metrics.pad_2d(x, pad_width, (False, False), metrics.PaddingMode.VOID)
+            actual = metrics.pad_2d(
+                x, pad_width, (False, False), metrics.PaddingMode.VOID
+            )
             onp.testing.assert_array_equal(expected, actual)
 
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [
             [((0, 0), (0, 0))],
             [((1, 5), (2, 4))],
@@ -470,7 +541,7 @@ class PaddingOperationsTest(unittest.TestCase):
 
 
 class MaximumTrueArgTest(unittest.TestCase):
-    @parameterized.parameterized.expand(
+    @parameterized.expand(
         [
             # 1  2  3  4  5  6  7  8  9  10 11
             ([1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0], 1, 11, 1, 10),
