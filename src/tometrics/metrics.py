@@ -52,6 +52,7 @@ class PaddingMode(enum.Enum):
 
 def minimum_length_scale(
     x: NDArray,
+    periodic: Tuple[bool, bool] = (False, False),
     ignore_scheme: IgnoreScheme = IgnoreScheme.EDGES,
     feasibility_gap_allowance: int = FEASIBILITY_GAP_ALLOWANCE,
 ) -> Tuple[int, int]:
@@ -70,6 +71,7 @@ def minimum_length_scale(
 
     Args:
         x: Bool-typed rank-2 array containing the features.
+        periodic: Specifies which of the two axes are to be regarded as periodic.
         ignore_scheme: Specifies what pixels are ignored when detecting violations.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
@@ -81,13 +83,18 @@ def minimum_length_scale(
         The detected minimum length scales `(length_scale_solid, length_scale_void)`.
     """
     return (
-        minimum_length_scale_solid(x, ignore_scheme, feasibility_gap_allowance),
-        minimum_length_scale_solid(~x, ignore_scheme, feasibility_gap_allowance),
+        minimum_length_scale_solid(
+            x, periodic, ignore_scheme, feasibility_gap_allowance
+        ),
+        minimum_length_scale_solid(
+            ~x, periodic, ignore_scheme, feasibility_gap_allowance
+        ),
     )
 
 
 def minimum_length_scale_solid(
     x: NDArray,
+    periodic: Tuple[bool, bool],
     ignore_scheme: IgnoreScheme,
     feasibility_gap_allowance: int,
 ) -> int:
@@ -95,6 +102,7 @@ def minimum_length_scale_solid(
 
     Args:
         x: Bool-typed rank-2 array containing the features.
+        periodic: Specifies which of the two axes are to be regarded as periodic.
         ignore_scheme: Specifies what pixels are ignored when detecting violations.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
@@ -112,6 +120,7 @@ def minimum_length_scale_solid(
             length_scale_violations_solid_with_allowance(
                 x=x,
                 length_scale=length_scale,
+                periodic=periodic,
                 ignore_scheme=ignore_scheme,
                 feasibility_gap_allowance=feasibility_gap_allowance,
             )
@@ -128,6 +137,7 @@ def minimum_length_scale_solid(
 def length_scale_violations_solid_with_allowance(
     x: NDArray,
     length_scale: int,
+    periodic: Tuple[bool, bool],
     ignore_scheme: IgnoreScheme,
     feasibility_gap_allowance: int,
 ) -> NDArray:
@@ -136,6 +146,7 @@ def length_scale_violations_solid_with_allowance(
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
+        periodic: Specifies which of the two axes are to be regarded as periodic.s
         ignore_scheme: Specifies what pixels are ignored when detecting violations.
         feasibility_gap_allowance: In checking whether a `x` is feasible with a brush
             of size `n`, we also check for feasibility with larger brushes, since
@@ -148,7 +159,9 @@ def length_scale_violations_solid_with_allowance(
     """
     violations = []
     for scale in range(length_scale, length_scale + feasibility_gap_allowance):
-        violations.append(length_scale_violations_solid(x, scale, ignore_scheme))
+        violations.append(
+            length_scale_violations_solid(x, scale, periodic, ignore_scheme)
+        )
     length_scale_violations: NDArray = onp.all(violations, axis=0)
     return length_scale_violations
 
@@ -156,6 +169,7 @@ def length_scale_violations_solid_with_allowance(
 def length_scale_violations_solid(
     x: NDArray,
     length_scale: int,
+    periodic: Tuple[bool, bool],
     ignore_scheme: IgnoreScheme,
 ) -> NDArray:
     """Identifies length scale violations of solid features in `x`.
@@ -163,6 +177,7 @@ def length_scale_violations_solid(
     Args:
         x: Bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
+        periodic: Specifies which of the two axes are to be regarded as periodic.s
         ignore_scheme: Specifies what pixels are ignored when detecting violations.
 
     Returns:
@@ -171,6 +186,7 @@ def length_scale_violations_solid(
     violations = _length_scale_violations_solid(
         wrapped_x=_HashableArray(x),
         length_scale=length_scale,
+        periodic=periodic,
         ignore_scheme=ignore_scheme,
     )
     assert violations.shape == x.shape
@@ -198,6 +214,7 @@ class _HashableArray:
 def _length_scale_violations_solid(
     wrapped_x: _HashableArray,
     length_scale: int,
+    periodic: Tuple[bool, bool],
     ignore_scheme: IgnoreScheme,
 ) -> NDArray:
     """Identifies length scale violations of solid features in `x`.
@@ -207,6 +224,7 @@ def _length_scale_violations_solid(
     Args:
         wrapped_x: The wrapped bool-typed rank-2 array containing the features.
         length_scale: The length scale for which violations are sought.
+        periodic: Specifies which of the two axes are to be regarded as periodic.
         ignore_scheme: Specifies what pixels are ignored when detecting violations.
 
     Returns:
@@ -214,9 +232,9 @@ def _length_scale_violations_solid(
     """
     x = wrapped_x.array
     kernel = kernel_for_length_scale(length_scale)
-    violations_solid = x & ~binary_opening(x, kernel, PaddingMode.SOLID)
+    violations_solid = x & ~binary_opening(x, kernel, periodic, PaddingMode.SOLID)
 
-    ignored = ignored_pixels(x, ignore_scheme)
+    ignored = ignored_pixels(x, periodic, ignore_scheme)
     violations_solid = violations_solid & ~ignored
     return violations_solid
 
@@ -241,18 +259,25 @@ def kernel_for_length_scale(length_scale: int) -> NDArray:
     kernel = squared_distance < (length_scale / 2) ** 2
     # Ensure that kernels larger than `2` can be realized with a width-3 brush.
     if length_scale > 2:
-        kernel = binary_opening(kernel, PLUS_3_KERNEL, PaddingMode.VOID)
+        kernel = binary_opening(
+            kernel,
+            kernel=PLUS_3_KERNEL,
+            periodic=(False, False),
+            padding_mode=PaddingMode.VOID,
+        )
     return kernel
 
 
 def ignored_pixels(
     x: NDArray,
+    periodic: Tuple[bool, bool],
     ignore_scheme: IgnoreScheme,
 ) -> NDArray:
     """Returns an array indicating locations at which violations are to be ignored.
 
     Args:
         x: The array for which ignored locations are to be identified.
+        periodic: Specifies which of the two axes are to be regarded as periodic.
         ignore_scheme: Specifies the manner in which ignored locations are identified.
 
     Returns:
@@ -262,9 +287,9 @@ def ignored_pixels(
     if ignore_scheme == IgnoreScheme.NONE:
         return onp.zeros_like(x)
     elif ignore_scheme == IgnoreScheme.EDGES:
-        return x & ~binary_erosion(x, PLUS_3_KERNEL, PaddingMode.SOLID)
+        return x & ~binary_erosion(x, PLUS_3_KERNEL, periodic, PaddingMode.SOLID)
     elif ignore_scheme == IgnoreScheme.LARGE_FEATURE_EDGES:
-        return x & ~erode_large_features(x)
+        return x & ~erode_large_features(x, periodic)
     else:
         raise ValueError(f"Unknown `ignore_scheme`, got {ignore_scheme}.")
 
@@ -274,7 +299,9 @@ def ignored_pixels(
 # ------------------------------------------------------------------------------
 
 
-def binary_opening(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
+def binary_opening(
+    x: NDArray, kernel: NDArray, periodic: Tuple[bool, bool], padding_mode: PaddingMode
+) -> NDArray:
     """Performs binary opening with the given `kernel` and padding mode."""
     assert x.ndim == 2
     assert x.dtype == bool
@@ -284,26 +311,30 @@ def binary_opening(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> ND
     # even-shape kernels, requiring padding and unpadding to differ.
     pad_width, unpad_width = _pad_width_for_kernel_shape(kernel.shape)
     opened = cv2.morphologyEx(
-        src=pad_2d(x, pad_width, padding_mode).view(onp.uint8),
+        src=pad_2d(x, pad_width, periodic, padding_mode).view(onp.uint8),
         kernel=kernel.view(onp.uint8),
         op=cv2.MORPH_OPEN,
     )
     return unpad(opened.view(bool), unpad_width)
 
 
-def binary_erosion(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
+def binary_erosion(
+    x: NDArray, kernel: NDArray, periodic: Tuple[bool, bool], padding_mode: PaddingMode
+) -> NDArray:
     """Performs binary erosion with structuring element `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
     pad_width = ((kernel.shape[0],) * 2, (kernel.shape[1],) * 2)
     eroded = cv2.erode(
-        src=pad_2d(x, pad_width, padding_mode).view(onp.uint8),
+        src=pad_2d(x, pad_width, periodic, padding_mode).view(onp.uint8),
         kernel=kernel.view(onp.uint8),
     )
     return unpad(eroded.view(bool), pad_width)
 
 
-def binary_dilation(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
+def binary_dilation(
+    x: NDArray, kernel: NDArray, periodic: Tuple[bool, bool], padding_mode: PaddingMode
+) -> NDArray:
     """Performs binary dilation with structuring element `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
@@ -311,7 +342,7 @@ def binary_dilation(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> N
     # even-shape kernels, requiring padding and unpadding to differ.
     pad_width, unpad_width = _pad_width_for_kernel_shape(kernel.shape)
     dilated = cv2.dilate(
-        src=pad_2d(x, pad_width, padding_mode).view(onp.uint8),
+        src=pad_2d(x, pad_width, periodic, padding_mode).view(onp.uint8),
         kernel=kernel.view(onp.uint8),
     )
     return unpad(dilated.view(bool), unpad_width)
@@ -337,7 +368,7 @@ def _pad_width_for_kernel_shape(shape: Tuple[int, ...]) -> Tuple[_Padding, _Padd
     return pad_width, unpad_width
 
 
-def erode_large_features(x: NDArray) -> NDArray:
+def erode_large_features(x: NDArray, periodic: Tuple[bool, bool]) -> NDArray:
     """Erodes large features while leaving small features untouched.
 
     Note that this operation can change the topology of `x`, i.e. it
@@ -346,6 +377,7 @@ def erode_large_features(x: NDArray) -> NDArray:
 
     Args:
         x: Bool-typed rank-2 array to be eroded.
+        periodic: Specifies which of the two axes are to be regarded as periodic.
 
     Returns:
         The array with eroded features.
@@ -354,7 +386,7 @@ def erode_large_features(x: NDArray) -> NDArray:
 
     # Identify interior solid pixels, which should not be removed. Pixels for
     # which the neighborhood sum equals `9` are interior pixels.
-    neighborhood_sum = _filter_2d(x, SQUARE_3_KERNEL, PaddingMode.EDGE)
+    neighborhood_sum = _filter_2d(x, SQUARE_3_KERNEL, periodic, PaddingMode.EDGE)
     interior_pixels = neighborhood_sum == 9
 
     # Identify solid pixels that are adjacent to interior pixels.
@@ -364,16 +396,21 @@ def erode_large_features(x: NDArray) -> NDArray:
         & binary_dilation(
             x=interior_pixels,
             kernel=PLUS_5_KERNEL,
+            periodic=periodic,
             padding_mode=PaddingMode.EDGE,
         )
     )
 
-    removed_by_erosion = x & ~binary_erosion(x, PLUS_3_KERNEL, PaddingMode.EDGE)
+    removed_by_erosion = x & ~binary_erosion(
+        x, PLUS_3_KERNEL, periodic, PaddingMode.EDGE
+    )
     should_remove = adjacent_to_interior & removed_by_erosion
     return onp.asarray(x & ~should_remove)
 
 
-def _filter_2d(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArray:
+def _filter_2d(
+    x: NDArray, kernel: NDArray, periodic: Tuple[bool, bool], padding_mode: PaddingMode
+) -> NDArray:
     """Convolves `x` with `kernel`."""
     assert x.dtype == bool
     assert kernel.dtype == bool
@@ -388,6 +425,7 @@ def _filter_2d(x: NDArray, kernel: NDArray, padding_mode: PaddingMode) -> NDArra
 def pad_2d(
     x: NDArray,
     pad_width: Tuple[Tuple[int, int], Tuple[int, int]],
+    periodic: Tuple[bool, bool],
     padding_mode: PaddingMode,
 ) -> NDArray:
     """Pads rank-2 boolean array `x` with the specified mode.
@@ -398,6 +436,7 @@ def pad_2d(
     Args:
         x: The array to be padded.
         pad_width: The extent of the padding, `((i_lo, i_hi), (j_lo, j_hi))`.
+        periodic: Specifies which of the two axes are to be regarded as periodic.
         padding_mode: Specifies the padding mode to be used.
 
     Returns:
