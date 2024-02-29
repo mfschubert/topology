@@ -553,3 +553,45 @@ def maximum_true_arg(
         else:
             max_arg = test_arg_start - 1
     return max_true_arg
+
+
+# ------------------------------------------------------------------------------
+# Functions that handle the special case of 1D patterns.
+# ------------------------------------------------------------------------------
+
+
+def minimum_length_scale_1d(x: NDArray, periodic: bool) -> Tuple[int, int]:
+    """Return the minimum solid and void length scale for a 1D array."""
+    assert x.dtype == bool
+    x = x.astype(int)
+
+    # Find interior locations within `x` where the pattern transistions from
+    # solid to void, or vice versa.
+    xpad = onp.pad(x, (1, 1), mode="edge")
+    delta = onp.roll(xpad, 1) - xpad
+    delta = delta[1:-1]
+    (idxs,) = onp.where(onp.abs(delta) > 0)
+
+    # Determine the dimensions of each region.
+    idxs = onp.concatenate([[0], idxs, [x.size]])
+    dims = idxs[1:] - idxs[:-1]
+
+    if periodic:
+        # Wrap the starting region in the case of a periodic pattern.
+        if x[0] == x[-1]:
+            dims = onp.concatenate([[dims[0] + dims[-1]], dims[1:-1]])
+            dims = onp.minimum(dims, x.size)
+    else:
+        # If not periodic, discount the first and last regions.
+        dims = dims[1:-1]
+
+    # Find the minimum length scale.
+    min_dim_first_region = int(onp.amin(dims[::2]) if len(dims) > 0 else x.size)
+    min_dim_second_region = int(onp.amin(dims[1::2]) if len(dims) > 1 else x.size)
+
+    starts_with_solid = bool(x[0])
+    starts_with_void = not starts_with_solid
+    if starts_with_solid and periodic or (starts_with_void and not periodic):
+        return min_dim_first_region, min_dim_second_region
+    else:
+        return min_dim_second_region, min_dim_first_region

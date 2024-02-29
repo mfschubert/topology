@@ -562,3 +562,26 @@ class MaximumTrueArgTest(unittest.TestCase):
         fn = lambda i: bool(sequence[i - 1])
         actual = metrics.maximum_true_arg(fn, min_arg, max_arg, allowance)
         assert expected == actual
+
+
+class OneDimensionalPatternTest(unittest.TestCase):
+    @parameterized.expand(
+        [
+            [[0, 0, 1, 1, 1, 0, 0, 0, 0, 0], False, (3, 10)],
+            [[0, 0, 1, 1, 1, 0, 0, 0, 0, 0], True, (3, 7)],
+            [[0, 0, 1, 1, 1, 0, 0, 0, 1, 1], True, (2, 2)],
+            [[0, 1, 1, 1, 0, 0, 0, 1, 1, 0], True, (2, 2)],
+            [[0, 1, 0, 1, 0, 0, 0, 1, 1, 0], True, (1, 1)],
+            [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], False, (10, 10)],
+            [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0], True, (10, 10)],
+            [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1], False, (10, 10)],
+            [[1, 1, 1, 1, 1, 1, 1, 1, 1, 1], True, (10, 10)],
+        ]
+    )
+    def test_minimum_feature_size_matches_expected(
+        self, pattern, periodic, expected_minimum_length
+    ):
+        minimum_length = metrics.minimum_length_scale_1d(
+            onp.asarray(pattern, dtype=bool), periodic
+        )
+        onp.testing.assert_array_equal(minimum_length, expected_minimum_length)
