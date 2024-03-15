@@ -53,7 +53,7 @@ class PaddingMode(enum.Enum):
 def minimum_length_scale(
     x: NDArray,
     periodic: Tuple[bool, bool] = (False, False),
-    ignore_scheme: IgnoreScheme = IgnoreScheme.EDGES,
+    ignore_scheme: IgnoreScheme = IgnoreScheme.LARGE_FEATURE_EDGES,
     feasibility_gap_allowance: int = FEASIBILITY_GAP_ALLOWANCE,
 ) -> Tuple[int, int]:
     """Identifies the minimum length scale of solid and void features in `x`.
@@ -82,6 +82,18 @@ def minimum_length_scale(
     Returns:
         The detected minimum length scales `(length_scale_solid, length_scale_void)`.
     """
+    if x.ndim != 2:
+        raise ValueError(f"`x` must be 2-dimensional, but got shape {x.shape}.")
+    if x.dtype != bool:
+        raise ValueError(f"`x` must be of type `bool` but got {type(x)}.")
+
+    # Use a dedicated codepath for arrays with a singleton axis.
+    if 1 in x.shape:
+        idx, squeeze_idx = (1, 0) if x.shape[0] == 1 else (0, 1)
+        return minimum_length_scale_1d(
+            onp.squeeze(x, axis=squeeze_idx), periodic=periodic[idx]
+        )
+
     return (
         minimum_length_scale_solid(
             x, periodic, ignore_scheme, feasibility_gap_allowance
