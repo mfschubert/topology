@@ -316,6 +316,24 @@ class PeriodicLengthScale(unittest.TestCase):
         onp.testing.assert_array_equal(length_scale_periodic_both, (20, pad_amount))
 
 
+class OneDimensionalLengthScaleTest(unittest.TestCase):
+    @parameterized.expand(
+        [
+            [[[0, 0, 0, 0, 0, 0, 0, 0, 0, 0]], (False, False), (10, 10)],
+            [[[0, 0, 1, 1, 0, 0, 0, 0, 0, 0]], (False, False), (2, 10)],
+            [[[0, 0, 1, 1, 0, 1, 1, 0, 0, 0]], (False, False), (2, 1)],
+            [[[0, 0, 1, 1, 0, 0, 0, 0, 0, 0]], (False, True), (2, 8)],
+            [[[0, 0, 1, 1, 0, 0, 0, 0, 0, 0]], (True, False), (2, 10)],
+        ]
+    )
+    def test_length_scale_matches_expected(self, x, periodic, expected):
+        mls = metrics.minimum_length_scale(
+            x=onp.asarray(x, dtype=bool),
+            periodic=periodic,
+        )
+        onp.testing.assert_array_equal(mls, expected)
+
+
 class KernelTest(unittest.TestCase):
     @parameterized.expand([(4, TEST_KERNEL_4), (5, TEST_KERNEL_5)])
     def test_kernel_matches_expected(self, length_scale, expected):
